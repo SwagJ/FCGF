@@ -24,6 +24,7 @@ if not os.path.isfile('redkitchen-20.ply'):
 
 def demo(config):
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+  print("Device Number is ", device)
 
   checkpoint = torch.load(config.model)
   model = ResUNetBN2C(1, 16, normalize_feature=True, conv1_kernel_size=3, D=3)

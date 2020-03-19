@@ -86,7 +86,7 @@ opt_arg.add_argument('--bn_momentum', type=float, default=0.05)
 opt_arg.add_argument('--exp_gamma', type=float, default=0.99)
 opt_arg.add_argument('--scheduler', type=str, default='ExpLR')
 opt_arg.add_argument(
-    '--icp_cache_path', type=str, default="/home/chrischoy/datasets/FCGF/kitti/icp/")
+    '--icp_cache_path', type=str, default="/disk/kitti/")
 
 misc_arg = add_argument_group('Misc')
 misc_arg.add_argument('--use_gpu', type=str2bool, default=True)
@@ -111,13 +111,21 @@ data_arg.add_argument('--voxel_size', type=float, default=0.025)
 data_arg.add_argument(
     '--threed_match_dir', type=str, default="/home/chrischoy/datasets/FCGF/threedmatch")
 data_arg.add_argument(
-    '--kitti_root', type=str, default="/home/chrischoy/datasets/FCGF/kitti/")
+    '--kitti_root', type=str, default="/disk/kitti/")
+data_arg.add_argument(
+    '--kaist_root', type=str, default="/disk_ssd/kaist/")
 data_arg.add_argument(
     '--kitti_max_time_diff',
     type=int,
     default=3,
     help='max time difference between pairs (non inclusive)')
+data_arg.add_argument(
+    '--kaist_max_time_diff',
+    type=int,
+    default=3,
+    help='max time difference between pairs (non inclusive)')
 data_arg.add_argument('--kitti_date', type=str, default='2011_09_26')
+data_arg.add_argument('--kaist_date', type=str, default='2020_03_10')
 
 
 def get_config():

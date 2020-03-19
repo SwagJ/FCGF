@@ -3,10 +3,10 @@ export PATH_POSTFIX=$1
 export MISC_ARGS=$2
 
 export DATA_ROOT="./outputs/Experiments"
-export DATASET=${DATASET:-KITTINMPairDataset}
+export DATASET=${DATASET:-KAISTLNMPairDataset}
 export TRAINER=${TRAINER:-HardestContrastiveLossTrainer}
 export MODEL=${MODEL:-ResUNetBN2C}
-export MODEL_N_OUT=${MODEL_N_OUT:-16}
+export MODEL_N_OUT=${MODEL_N_OUT:-32}
 export OPTIMIZER=${OPTIMIZER:-SGD}
 export LR=${LR:-1e-1}
 export MAX_EPOCH=${MAX_EPOCH:-200}
@@ -18,7 +18,7 @@ export CONV1_KERNEL_SIZE=${CONV1_KERNEL_SIZE:-5}
 export EXP_GAMMA=${EXP_GAMMA:-0.99}
 export RANDOM_SCALE=${RANDOM_SCALE:-True}
 export TIME=$(date +"%Y-%m-%d_%H-%M-%S")
-export KITTI_PATH=${KITTI_PATH:-/home/chrischoy/datasets/KITTI_FCGF}
+export KAIST_PATH=${KAIST_PATH:-/disk_ssd/kaist}
 export VERSION=$(git rev-parse HEAD)
 
 export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/${OPTIMIZER}-lr${LR}-e${MAX_EPOCH}-b${BATCH_SIZE}i${ITER_SIZE}-modelnout${MODEL_N_OUT}${PATH_POSTFIX}/${TIME}
@@ -57,9 +57,9 @@ python train.py \
 	--out_dir ${OUT_DIR} \
 	--use_random_scale ${RANDOM_SCALE} \
 	--positive_pair_search_voxel_size_multiplier ${POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER} \
-	--kitti_root ${KITTI_PATH} \
+	--kaist_root ${KAIST_PATH} \
 	--hit_ratio_thresh 0.3 \
-	--icp_cache_path "/disk/kitti/icp" \
+	--icp_cache_path "/disk/kaist/icp" \
 	$MISC_ARGS 2>&1 | tee -a $LOG
 
 # Test

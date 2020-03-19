@@ -19,8 +19,14 @@ import MinkowskiEngine as ME
 
 import open3d as o3d
 
+from scipy.interpolate import interp1d
+from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Slerp
+
 kitti_cache = {}
 kitti_icp_cache = {}
+kaist_cache = {}
+kaist_icp_cache = {}
 
 
 def collate_pair_fn(list_data):
@@ -304,6 +310,7 @@ class KITTIPairDataset(PairDataset):
   def get_video_odometry(self, drive, indices=None, ext='.txt', return_all=False):
     if self.IS_ODOMETRY:
       data_path = self.root + '/poses/%02d.txt' % drive
+      #print(data_path)
       if data_path not in kitti_cache:
         kitti_cache[data_path] = np.genfromtxt(data_path)
       if return_all:
@@ -516,8 +523,10 @@ class KITTINMPairDataset(KITTIPairDataset):
       for dirname in subset_names:
         drive_id = int(dirname)
         fnames = glob.glob(root + '/sequences/%02d/velodyne/*.bin' % drive_id)
+        #print(fnames)
         assert len(fnames) > 0, f"Make sure that the path {root} has data {dirname}"
         inames = sorted([int(os.path.split(fname)[-1][:-4]) for fname in fnames])
+        #print(inames)
 
         all_odo = self.get_video_odometry(drive_id, return_all=True)
         all_pos = np.array([self.odometry_to_positions(odo) for odo in all_odo])
@@ -525,9 +534,11 @@ class KITTINMPairDataset(KITTIPairDataset):
         pdist = (Ts.reshape(1, -1, 3) - Ts.reshape(-1, 1, 3))**2
         pdist = np.sqrt(pdist.sum(-1))
         valid_pairs = pdist > self.MIN_DIST
+        #print(np.shape(valid_pairs))
         curr_time = inames[0]
         while curr_time in inames:
           # Find the min index
+          #print(curr_time)
           next_time = np.where(valid_pairs[curr_time][curr_time:curr_time + 100])[0]
           if len(next_time) == 0:
             curr_time += 1
@@ -536,6 +547,7 @@ class KITTINMPairDataset(KITTIPairDataset):
             next_time = next_time[0] + curr_time - 1
 
           if next_time in inames:
+            #print("Appending Files")
             self.files.append((drive_id, curr_time, next_time))
             curr_time = next_time + 1
     else:
@@ -569,8 +581,921 @@ class KITTINMPairDataset(KITTIPairDataset):
       for item in [
           (8, 15, 58),
       ]:
+        print("items are ",item)
         if item in self.files:
           self.files.pop(self.files.index(item))
+
+
+#########################################################
+#
+#              KAIST_DATASET_Left
+#
+# added config: kaist_root,kaist_date,kaist_max_time_diff
+#       train_kaist.txt,val_kaist.txt,test_kaist.txt
+#
+#########################################################
+
+class KAISTLPairDataset(PairDataset):
+  AUGMENT = None
+  DATA_FILES = {
+      'train': './config/train_kaist.txt',
+      'val': './config/val_kaist.txt',
+      'test': './config/test_kaist.txt'
+  }
+  TEST_RANDOM_ROTATION = False
+  IS_ODOMETRY = True
+
+  def __init__(self,
+               phase,
+               transform=None,
+               random_rotation=True,
+               random_scale=True,
+               manual_seed=False,
+               config=None):
+    # For evaluation, use the odometry dataset training following the 3DFeat eval method
+    if self.IS_ODOMETRY:
+      self.root = root = config.kaist_root
+      random_rotation = self.TEST_RANDOM_ROTATION
+    else:
+      self.date = config.kaist_date
+      self.root = root = os.path.join(config.kaist_root, self.date)
+
+    self.icp_path = os.path.join(config.kaist_root, 'icp')
+    pathlib.Path(self.icp_path).mkdir(parents=True, exist_ok=True)
+
+    PairDataset.__init__(self, phase, transform, random_rotation, random_scale,
+                         manual_seed, config)
+
+    logging.info(f"Loading the subset {phase} from {root}")
+    # Use the kitti root
+    self.max_time_diff = max_time_diff = config.kaist_max_time_diff
+
+    subset_names = open(self.DATA_FILES[phase]).read().split()
+    for dirname in subset_names:
+      drive_id = int(dirname)
+      inames = self.get_all_scan_ids(drive_id)
+      for start_time in inames:
+        for time_diff in range(2, max_time_diff):
+          pair_time = time_diff + start_time
+          if pair_time in inames:
+            self.files.append((drive_id, start_time, pair_time))
+
+  def get_all_scan_ids(self, drive_id):
+    load_path = self.root + '/%02d/' % drive_id + 'left_valid.csv'
+    valid_time = np.genfromtxt(load_path,delimiter=',')
+    fnames = []
+    for time in valid_time:
+      if self.IS_ODOMETRY:
+        fnames.extend(glob.glob(self.root + '/%02d/VLP_left/' % drive_id + '%06d.bin' % time))
+      else:
+        fnames.extend(glob.glob(self.root + '/' + self.date +
+                         '_drive_%04d_sync/velodyne_points/data/*.bin' % drive_id))
+    assert len(
+        fnames) > 0, f"Make sure that the path {self.root} has drive id: {drive_id}"
+
+    inames = [int(os.path.split(fname)[-1][:-4]) for fname in fnames]
+    return inames
+
+  @property
+  def velo2cam(self):
+    try:
+      velo2cam = self._velo2cam
+    except AttributeError:
+      R = np.array([
+          7.533745e-03, -9.999714e-01, -6.166020e-04, 1.480249e-02, 7.280733e-04,
+          -9.998902e-01, 9.998621e-01, 7.523790e-03, 1.480755e-02
+      ]).reshape(3, 3)
+      T = np.array([-4.069766e-03, -7.631618e-02, -2.717806e-01]).reshape(3, 1)
+      velo2cam = np.hstack([R, T])
+      self._velo2cam = np.vstack((velo2cam, [0, 0, 0, 1])).T
+    return self._velo2cam
+
+  def get_video_odometry(self, drive, indices=None, ext='.txt', return_all=False):
+    if self.IS_ODOMETRY:
+      #logging.info(f"Drive id is {drive}")
+      data_path = self.root + '/%02d/VLP_left_pose.csv' % drive
+      #print(data_path)
+      if data_path not in kaist_cache:
+        kaist_cache[data_path] = np.genfromtxt(data_path,delimiter=',')
+        #print(np.shape(kaist_cache[data_path]))
+      if return_all:
+        return kaist_cache[data_path]
+      else:
+        return kaist_cache[data_path][indices]
+    else: 
+      data_path = self.root + '/' + self.date + '_drive_%04d_sync/oxts/data' % drive
+      odometry = []
+      if indices is None:
+        fnames = glob.glob(self.root + '/' + self.date +
+                           '_drive_%04d_sync/velodyne_points/data/*.bin' % drive)
+        indices = sorted([int(os.path.split(fname)[-1][:-4]) for fname in fnames])
+
+      for index in indices:
+        filename = os.path.join(data_path, '%010d%s' % (index, ext))
+        if filename not in kaist_cache:
+          kaist_cache[filename] = np.genfromtxt(filename)
+        odometry.append(kaist_cache[filename])
+
+      odometry = np.array(odometry)
+      return odometry
+
+  def odometry_to_positions(self, odometry):
+    if self.IS_ODOMETRY:
+      T_w_cam0 = odometry.reshape(3, 4)
+      T_w_cam0 = np.vstack((T_w_cam0, [0, 0, 0, 1]))
+      return T_w_cam0
+    else:
+      lat, lon, alt, roll, pitch, yaw = odometry.T[:6]
+
+      R = 6378137  # Earth's radius in metres
+
+      # convert to metres
+      lat, lon = np.deg2rad(lat), np.deg2rad(lon)
+      mx = R * lon * np.cos(lat)
+      my = R * lat
+
+      times = odometry.T[-1]
+      return np.vstack([mx, my, alt, roll, pitch, yaw, times]).T
+
+  def rot3d(self, axis, angle):
+    ei = np.ones(3, dtype='bool')
+    ei[axis] = 0
+    i = np.nonzero(ei)[0]
+    m = np.eye(3)
+    c, s = np.cos(angle), np.sin(angle)
+    m[i[0], i[0]] = c
+    m[i[0], i[1]] = -s
+    m[i[1], i[0]] = s
+    m[i[1], i[1]] = c
+    return m
+
+  def pos_transform(self, pos):
+    x, y, z, rx, ry, rz, _ = pos[0]
+    RT = np.eye(4)
+    RT[:3, :3] = np.dot(np.dot(self.rot3d(0, rx), self.rot3d(1, ry)), self.rot3d(2, rz))
+    RT[:3, 3] = [x, y, z]
+    return RT
+
+  def get_position_transform(self, pos0, pos1, invert=False):
+    T0 = self.pos_transform(pos0)
+    T1 = self.pos_transform(pos1)
+    return (np.dot(T1, np.linalg.inv(T0)).T if not invert else np.dot(
+        np.linalg.inv(T1), T0).T)
+
+  def _get_velodyne_fn(self, drive, t):
+    if self.IS_ODOMETRY:
+      fname = self.root + '/%02d/VLP_left/%06d.bin' % (drive, t)
+    else:
+      fname = self.root + \
+          '/' + self.date + '_drive_%04d_sync/velodyne_points/data/%010d.bin' % (
+              drive, t)
+    return fname
+
+  def __getitem__(self, idx):
+    drive = self.files[idx][0]
+    inames = self.get_all_scan_ids(drive)
+    t0, t1 = self.files[idx][1], self.files[idx][2]
+    t0_odo,t1_odo = self.files[idx][1] - inames[0],self.files[idx][2] - inames[0]
+    all_odometry = self.get_video_odometry(drive, [t0_odo, t1_odo])
+    positions = [self.odometry_to_positions(odometry) for odometry in all_odometry]
+    fname0 = self._get_velodyne_fn(drive, t0)
+    fname1 = self._get_velodyne_fn(drive, t1)
+
+    # XYZ and reflectance
+    xyzr0 = np.fromfile(fname0, dtype=np.float32).reshape(-1, 4)
+    xyzr1 = np.fromfile(fname1, dtype=np.float32).reshape(-1, 4)
+
+    xyz0 = xyzr0[:, :3]
+    xyz1 = xyzr1[:, :3]
+
+    key = '%d_%d_%d' % (drive, t0, t1)
+    filename = self.icp_path + '/' + key + '.npy'
+    if key not in kaist_icp_cache:
+      if not os.path.exists(filename):
+        # work on the downsampled xyzs, 0.05m == 5cm
+        sel0 = ME.utils.sparse_quantize(xyz0 / 0.05, return_index=True)
+        sel1 = ME.utils.sparse_quantize(xyz1 / 0.05, return_index=True)
+
+        M = (self.velo2cam @ positions[0].T @ np.linalg.inv(positions[1].T)
+             @ np.linalg.inv(self.velo2cam)).T
+        xyz0_t = self.apply_transform(xyz0[sel0], M)
+        pcd0 = make_open3d_point_cloud(xyz0_t)
+        pcd1 = make_open3d_point_cloud(xyz1[sel1])
+        reg = o3d.registration.registration_icp(
+            pcd0, pcd1, 0.2, np.eye(4),
+            o3d.registration.TransformationEstimationPointToPoint(),
+            o3d.registration.ICPConvergenceCriteria(max_iteration=200))
+        pcd0.transform(reg.transformation)
+        # pcd0.transform(M2) or self.apply_transform(xyz0, M2)
+        M2 = M @ reg.transformation
+        # o3d.draw_geometries([pcd0, pcd1])
+        # write to a file
+        np.save(filename, M2)
+      else:
+        M2 = np.load(filename)
+      kaist_icp_cache[key] = M2
+    else:
+      M2 = kaist_icp_cache[key]
+
+    if self.random_rotation:
+      T0 = sample_random_trans(xyz0, self.randg, np.pi / 4)
+      T1 = sample_random_trans(xyz1, self.randg, np.pi / 4)
+      trans = T1 @ M2 @ np.linalg.inv(T0)
+
+      xyz0 = self.apply_transform(xyz0, T0)
+      xyz1 = self.apply_transform(xyz1, T1)
+    else:
+      trans = M2
+
+    matching_search_voxel_size = self.matching_search_voxel_size
+    if self.random_scale and random.random() < 0.95:
+      scale = self.min_scale + \
+          (self.max_scale - self.min_scale) * random.random()
+      matching_search_voxel_size *= scale
+      xyz0 = scale * xyz0
+      xyz1 = scale * xyz1
+
+    # Voxelization
+    xyz0_th = torch.from_numpy(xyz0)
+    xyz1_th = torch.from_numpy(xyz1)
+
+    sel0 = ME.utils.sparse_quantize(xyz0_th / self.voxel_size, return_index=True)
+    sel1 = ME.utils.sparse_quantize(xyz1_th / self.voxel_size, return_index=True)
+
+    # Make point clouds using voxelized points
+    pcd0 = make_open3d_point_cloud(xyz0[sel0])
+    pcd1 = make_open3d_point_cloud(xyz1[sel1])
+
+    # Get matches
+    matches = get_matching_indices(pcd0, pcd1, trans, matching_search_voxel_size)
+    #if len(matches) < 1000:
+      #raise ValueError(f"{drive}, {t0}, {t1}")
+      #return
+
+    # Get features
+    npts0 = len(sel0)
+    npts1 = len(sel1)
+
+    feats_train0, feats_train1 = [], []
+
+    unique_xyz0_th = xyz0_th[sel0]
+    unique_xyz1_th = xyz1_th[sel1]
+
+    feats_train0.append(torch.ones((npts0, 1)))
+    feats_train1.append(torch.ones((npts1, 1)))
+
+    feats0 = torch.cat(feats_train0, 1)
+    feats1 = torch.cat(feats_train1, 1)
+
+    coords0 = torch.floor(unique_xyz0_th / self.voxel_size)
+    coords1 = torch.floor(unique_xyz1_th / self.voxel_size)
+
+    if self.transform:
+      coords0, feats0 = self.transform(coords0, feats0)
+      coords1, feats1 = self.transform(coords1, feats1)
+
+    return (unique_xyz0_th.float(), unique_xyz1_th.float(), coords0.int(),
+            coords1.int(), feats0.float(), feats1.float(), matches, trans)
+
+
+
+class KAISTLNMPairDataset(KAISTLPairDataset):
+  r"""
+  Generate KITTI pairs within N meter distance
+  """
+  MIN_DIST = 10
+
+  def __init__(self,
+               phase,
+               transform=None,
+               random_rotation=True,
+               random_scale=True,
+               manual_seed=False,
+               config=None):
+    if self.IS_ODOMETRY:
+      self.root = root = config.kaist_root
+      random_rotation = self.TEST_RANDOM_ROTATION
+    else:
+      self.date = config.kaist_date
+      self.root = root = os.path.join(config.kaist_root, self.date)
+
+    self.icp_path = os.path.join(config.kaist_root, 'icp')
+    pathlib.Path(self.icp_path).mkdir(parents=True, exist_ok=True)
+
+    PairDataset.__init__(self, phase, transform, random_rotation, random_scale,
+                         manual_seed, config)
+
+    logging.info(f"Loading the subset {phase} from {root}")
+
+    subset_names = open(self.DATA_FILES[phase]).read().split()
+    if self.IS_ODOMETRY:
+      for dirname in subset_names:
+        drive_id = int(dirname)
+        logging.info(f"Processing Sequence {drive_id}")
+        self.kaist_interpolate(left=True,data_root=root,drive_id=drive_id)
+        load_path = root + '/%02d/' % drive_id + 'left_valid.csv'
+        valid_time = np.genfromtxt(load_path,delimiter=',')
+        fnames = []
+        for time in valid_time:
+          fnames.extend(glob.glob(self.root + '/%02d/VLP_left/%06d.bin' % (drive_id, time)))
+
+        #print(fnames)
+        assert len(fnames) > 0, f"Make sure that the path {root} has data {dirname}"
+        inames = sorted([int(os.path.split(fname)[-1][:-4]) for fname in fnames])
+        #print(inames)
+
+        all_odo = self.get_video_odometry(drive_id, return_all=True)
+        #print(all_odo.shape)
+        all_pos = np.array([self.odometry_to_positions(odo) for odo in all_odo])
+        logging.info(f"Position Acquisition Done")
+        Ts = all_pos[:, :3, 3]
+        pdist = (Ts.reshape(1, -1, 3) - Ts.reshape(-1, 1, 3))**2
+        pdist = np.sqrt(pdist.sum(-1))
+        valid_pairs = pdist > self.MIN_DIST
+        #print(np.shape(valid_pairs))
+        curr_time = inames[0]
+        loop_names = np.asarray(inames) - inames[0]
+        while curr_time in loop_names:
+          #print(curr_time)
+          # Find the min index
+          next_time = np.where(valid_pairs[curr_time][curr_time:curr_time + 100])[0]
+          #print(next_time)
+          if len(next_time) == 0:
+            curr_time += 1
+          else:
+            # Follow https://github.com/yewzijian/3DFeatNet/blob/master/scripts_data_processing/kitti/process_kitti_data.m#L44
+            next_time = next_time[0] + curr_time - 1
+
+          if next_time in inames:
+            if self.valid_pair(drive_id,curr_time + inames[0],next_time + inames[0], inames[0]):
+            #print("Appending Files")
+              self.files.append((drive_id, curr_time + inames[0], next_time + inames[0]))
+            #logging.info(f"current time_stamp {curr_time}")
+            curr_time = next_time + 1
+    else:
+      for dirname in subset_names:
+        drive_id = int(dirname)
+        fnames = glob.glob(root + '/' + self.date +
+                           '_drive_%04d_sync/velodyne_points/data/*.bin' % drive_id)
+        assert len(fnames) > 0, f"Make sure that the path {root} has data {dirname}"
+        inames = sorted([int(os.path.split(fname)[-1][:-4]) for fname in fnames])
+
+        all_odo = self.get_video_odometry(drive_id, return_all=True)
+        all_pos = np.array([self.odometry_to_positions(odo) for odo in all_odo])
+        Ts = all_pos[:, 0, :3]
+
+        pdist = (Ts.reshape(1, -1, 3) - Ts.reshape(-1, 1, 3))**2
+        pdist = np.sqrt(pdist.sum(-1))
+
+        for start_time in inames:
+          pair_time = np.where(
+              pdist[start_time][start_time:start_time + 100] > self.MIN_DIST)[0]
+          if len(pair_time) == 0:
+            continue
+          else:
+            pair_time = pair_time[0] + start_time
+
+          if pair_time in inames:
+              self.files.append((drive_id, start_time, pair_time))
+
+    logging.info(f"length of files found {len(self.files)}")
+
+  def kaist_interpolate(self,left=None,data_root=None,drive_id=None):
+    pose_path = data_root + '/' + '%02d/' % drive_id + 'global_pose.csv'
+    pose = np.genfromtxt(pose_path,delimiter=',')
+    if left == True:
+      stamp_path = data_root + '/' + '%02d/' % drive_id + 'VLP_left_stamp.csv'
+      write_VLP_path = data_root + '/' + '%02d/' % drive_id + 'VLP_left_pose.csv'
+      write_valid_path = data_root + '/' + '%02d/' % drive_id + 'left_valid.csv'
+      time_stamp = np.genfromtxt(stamp_path,delimiter=',')
+    else: 
+      stamp_path = data_root + '/' + '%02d/' % drive_id + 'VLP_right_stamp.csv'
+      write_VLP_path = data_root + '/' + '%02d/' % drive_id + 'VLP_right_pose.csv'
+      write_valid_path = data_root + '/' + '%02d/' % drive_id + 'right_valid.csv'
+      time_stamp = np.genfromtxt(stamp_path,delimiter=',')
+
+    time = pose[:,0]
+    pose = pose[:,1:13]
+
+    pose = pose.reshape(-1,3,4)
+    rotate = pose[:,:,0:3]
+    translation = pose[:,:,3]
+
+    valid_start = (time_stamp > np.min(time)).astype(int)
+    valid_end = (time_stamp < np.max(time)).astype(int)
+    valid_idx = np.where(valid_start*valid_end == 1)
+    valid_time = time_stamp[valid_idx]
+
+    # interpolate translation matrix
+    trans_interpolate = interp1d(time,translation,kind='linear',axis=0)
+    trans = trans_interpolate(valid_time).reshape(valid_time.shape[0],3,1)
+
+    # interpolate rotation matrix
+    slerp = Slerp(time,R.from_matrix(rotate))
+    rotate = slerp(valid_time).as_matrix()
+
+    VLP_pose = np.concatenate((rotate,trans),axis=2).reshape(valid_time.shape[0],12)
+
+    valid_idx = np.asarray(valid_idx).T
+    np.savetxt(write_VLP_path,VLP_pose,delimiter=',')
+    np.savetxt(write_valid_path,valid_idx,delimiter=',')  
+    
+    return
+
+  def valid_pair(self,drive=None,t0=None,t1=None,offset=None):
+    #logging.info(f"Function called")
+    all_odometry = self.get_video_odometry(drive, [t0-offset, t1-offset])
+    #print(np.shape(all_odometry))
+    positions = [self.odometry_to_positions(odometry) for odometry in all_odometry]
+    fname0 = self.root + '/%02d/VLP_left/%06d.bin' % (drive, t0)
+    fname1 = self.root + '/%02d/VLP_left/%06d.bin' % (drive, t1)
+    xyzr0 = np.fromfile(fname0, dtype=np.float32).reshape(-1, 4)
+    xyzr1 = np.fromfile(fname1, dtype=np.float32).reshape(-1, 4)
+
+    xyz0 = xyzr0[:, :3]
+    xyz1 = xyzr1[:, :3]
+
+    key = '%d_%d_%d' % (drive, t0, t1)
+    filename = self.icp_path + '/' + key + '.npy'
+    if key not in kitti_icp_cache:
+      if not os.path.exists(filename):
+        # work on the downsampled xyzs, 0.05m == 5cm
+        sel0 = ME.utils.sparse_quantize(xyz0 / 0.05, return_index=True)
+        sel1 = ME.utils.sparse_quantize(xyz1 / 0.05, return_index=True)
+
+        M = (self.velo2cam @ positions[0].T @ np.linalg.inv(positions[1].T)
+             @ np.linalg.inv(self.velo2cam)).T
+        xyz0_t = self.apply_transform(xyz0[sel0], M)
+        pcd0 = make_open3d_point_cloud(xyz0_t)
+        pcd1 = make_open3d_point_cloud(xyz1[sel1])
+        reg = o3d.registration.registration_icp(
+            pcd0, pcd1, 0.2, np.eye(4),
+            o3d.registration.TransformationEstimationPointToPoint(),
+            o3d.registration.ICPConvergenceCriteria(max_iteration=200))
+        pcd0.transform(reg.transformation)
+        # pcd0.transform(M2) or self.apply_transform(xyz0, M2)
+        M2 = M @ reg.transformation
+        # o3d.draw_geometries([pcd0, pcd1])
+        # write to a file
+        np.save(filename, M2)
+      else:
+        M2 = np.load(filename)
+      kitti_icp_cache[key] = M2
+    else:
+      M2 = kitti_icp_cache[key]
+
+    if self.random_rotation:
+      T0 = sample_random_trans(xyz0, self.randg, np.pi / 4)
+      T1 = sample_random_trans(xyz1, self.randg, np.pi / 4)
+      trans = T1 @ M2 @ np.linalg.inv(T0)
+
+      xyz0 = self.apply_transform(xyz0, T0)
+      xyz1 = self.apply_transform(xyz1, T1)
+    else:
+      trans = M2
+
+    matching_search_voxel_size = self.matching_search_voxel_size
+    if self.random_scale and random.random() < 0.95:
+      scale = self.min_scale + \
+          (self.max_scale - self.min_scale) * random.random()
+      matching_search_voxel_size *= scale
+      xyz0 = scale * xyz0
+      xyz1 = scale * xyz1
+
+    xyz0_th = torch.from_numpy(xyz0)
+    xyz1_th = torch.from_numpy(xyz1)
+
+    sel0 = ME.utils.sparse_quantize(xyz0_th / self.voxel_size, return_index=True)
+    sel1 = ME.utils.sparse_quantize(xyz1_th / self.voxel_size, return_index=True)
+
+    # Make point clouds using voxelized points
+    pcd0 = make_open3d_point_cloud(xyz0[sel0])
+    pcd1 = make_open3d_point_cloud(xyz1[sel1])
+
+    # Get matches
+    matches = get_matching_indices(pcd0, pcd1, trans, matching_search_voxel_size)
+    if len(matches) < 1000:
+      return False
+    else:
+      return True
+
+    #if self.IS_ODOMETRY:
+      # Remove problematic sequence
+     # for item in [
+     #     (8, 15, 58),
+     # ]:
+     #   print("items are ",item)
+     #   if item in self.files:
+     #     self.files.pop(self.files.index(item))
+
+#########################################################
+#
+#              KAIST_DATASET_Right
+#
+# added config: kaist_root,kaist_date,kaist_max_time_diff
+#       train_kaist.txt,val_kaist.txt,test_kaist.txt
+#
+#########################################################
+
+class KAISTRPairDataset(PairDataset):
+  AUGMENT = None
+  DATA_FILES = {
+      'train': './config/train_kaist.txt',
+      'val': './config/val_kaist.txt',
+      'test': './config/test_kaist.txt'
+  }
+  TEST_RANDOM_ROTATION = False
+  IS_ODOMETRY = True
+
+  def __init__(self,
+               phase,
+               transform=None,
+               random_rotation=True,
+               random_scale=True,
+               manual_seed=False,
+               config=None):
+    # For evaluation, use the odometry dataset training following the 3DFeat eval method
+    if self.IS_ODOMETRY:
+      self.root = root = config.kaist_root
+      random_rotation = self.TEST_RANDOM_ROTATION
+    else:
+      self.date = config.kaist_date
+      self.root = root = os.path.join(config.kaist_root, self.date)
+
+    self.icp_path = os.path.join(config.kaist_root, 'icp')
+    pathlib.Path(self.icp_path).mkdir(parents=True, exist_ok=True)
+
+    PairDataset.__init__(self, phase, transform, random_rotation, random_scale,
+                         manual_seed, config)
+
+    logging.info(f"Loading the subset {phase} from {root}")
+    # Use the kitti root
+    self.max_time_diff = max_time_diff = config.kaist_max_time_diff
+
+    subset_names = open(self.DATA_FILES[phase]).read().split()
+    for dirname in subset_names:
+      drive_id = int(dirname)
+      inames = self.get_all_scan_ids(drive_id)
+      for start_time in inames:
+        for time_diff in range(2, max_time_diff):
+          pair_time = time_diff + start_time
+          if pair_time in inames:
+            self.files.append((drive_id, start_time, pair_time))
+
+  def get_all_scan_ids(self, drive_id):
+    load_path = self.root + '/%02d/' % drive_id + 'right_valid.csv'
+    valid_time = np.genfromtxt(load_path,delimiter=',')
+    fnames = []
+    for time in valid_time:
+      if self.IS_ODOMETRY:
+        fnames.extend(glob.glob(self.root + '/%02d/VLP_right/' % drive_id + '%06d.bin' % time))
+      else:
+        fnames.extend(glob.glob(self.root + '/' + self.date +
+                         '_drive_%04d_sync/velodyne_points/data/*.bin' % drive_id))
+      assert len(
+        fnames) > 0, f"Make sure that the path {self.root} has drive id: {drive_id}"
+
+    inames = [int(os.path.split(fname)[-1][:-4]) for fname in fnames]
+    return inames
+
+  @property
+  def velo2cam(self):
+    try:
+      velo2cam = self._velo2cam
+    except AttributeError:
+      R = np.array([
+          7.533745e-03, -9.999714e-01, -6.166020e-04, 1.480249e-02, 7.280733e-04,
+          -9.998902e-01, 9.998621e-01, 7.523790e-03, 1.480755e-02
+      ]).reshape(3, 3)
+      T = np.array([-4.069766e-03, -7.631618e-02, -2.717806e-01]).reshape(3, 1)
+      velo2cam = np.hstack([R, T])
+      self._velo2cam = np.vstack((velo2cam, [0, 0, 0, 1])).T
+    return self._velo2cam
+
+  def get_video_odometry(self, drive, indices=None, ext='.txt', return_all=False):
+    if self.IS_ODOMETRY:
+      data_path = self.root + '/%02d/VLP_right_pose.csv' % drive
+      if data_path not in kaist_cache:
+        kaist_cache[data_path] = np.genfromtxt(data_path,delimiter=',')
+      if return_all:
+        return kaist_cache[data_path]
+      else:
+        return kaist_cache[data_path][indices]
+    else:
+      data_path = self.root + '/' + self.date + '_drive_%04d_sync/oxts/data' % drive
+      odometry = []
+      if indices is None:
+        fnames = glob.glob(self.root + '/' + self.date +
+                           '_drive_%04d_sync/velodyne_points/data/*.bin' % drive)
+        indices = sorted([int(os.path.split(fname)[-1][:-4]) for fname in fnames])
+
+      for index in indices:
+        filename = os.path.join(data_path, '%010d%s' % (index, ext))
+        if filename not in kaist_cache:
+          kaist_cache[filename] = np.genfromtxt(filename)
+        odometry.append(kaist_cache[filename])
+
+      odometry = np.array(odometry)
+      return odometry
+
+  def odometry_to_positions(self, odometry):
+    if self.IS_ODOMETRY:
+      T_w_cam0 = odometry.reshape(3, 4)
+      T_w_cam0 = np.vstack((T_w_cam0, [0, 0, 0, 1]))
+      return T_w_cam0
+    else:
+      lat, lon, alt, roll, pitch, yaw = odometry.T[:6]
+
+      R = 6378137  # Earth's radius in metres
+
+      # convert to metres
+      lat, lon = np.deg2rad(lat), np.deg2rad(lon)
+      mx = R * lon * np.cos(lat)
+      my = R * lat
+
+      times = odometry.T[-1]
+      return np.vstack([mx, my, alt, roll, pitch, yaw, times]).T
+
+  def rot3d(self, axis, angle):
+    ei = np.ones(3, dtype='bool')
+    ei[axis] = 0
+    i = np.nonzero(ei)[0]
+    m = np.eye(3)
+    c, s = np.cos(angle), np.sin(angle)
+    m[i[0], i[0]] = c
+    m[i[0], i[1]] = -s
+    m[i[1], i[0]] = s
+    m[i[1], i[1]] = c
+    return m
+
+  def pos_transform(self, pos):
+    x, y, z, rx, ry, rz, _ = pos[0]
+    RT = np.eye(4)
+    RT[:3, :3] = np.dot(np.dot(self.rot3d(0, rx), self.rot3d(1, ry)), self.rot3d(2, rz))
+    RT[:3, 3] = [x, y, z]
+    return RT
+
+  def get_position_transform(self, pos0, pos1, invert=False):
+    T0 = self.pos_transform(pos0)
+    T1 = self.pos_transform(pos1)
+    return (np.dot(T1, np.linalg.inv(T0)).T if not invert else np.dot(
+        np.linalg.inv(T1), T0).T)
+
+  def _get_velodyne_fn(self, drive, t):
+    if self.IS_ODOMETRY:
+      fname = self.root + '/%02d/VLP_right/%06d.bin' % (drive, t)
+    else:
+      fname = self.root + \
+          '/' + self.date + '_drive_%04d_sync/velodyne_points/data/%010d.bin' % (
+              drive, t)
+    return fname
+
+  def __getitem__(self, idx):
+    drive = self.files[idx][0]
+    t0, t1 = self.files[idx][1], self.files[idx][2]
+    all_odometry = self.get_video_odometry(drive, [t0, t1])
+    positions = [self.odometry_to_positions(odometry) for odometry in all_odometry]
+    fname0 = self._get_velodyne_fn(drive, t0)
+    fname1 = self._get_velodyne_fn(drive, t1)
+
+    # XYZ and reflectance
+    xyzr0 = np.fromfile(fname0, dtype=np.float32).reshape(-1, 4)
+    xyzr1 = np.fromfile(fname1, dtype=np.float32).reshape(-1, 4)
+
+    xyz0 = xyzr0[:, :3]
+    xyz1 = xyzr1[:, :3]
+
+    key = '%d_%d_%d' % (drive, t0, t1)
+    filename = self.icp_path + '/' + key + '.npy'
+    if key not in kaist_icp_cache:
+      if not os.path.exists(filename):
+        # work on the downsampled xyzs, 0.05m == 5cm
+        sel0 = ME.utils.sparse_quantize(xyz0 / 0.05, return_index=True)
+        sel1 = ME.utils.sparse_quantize(xyz1 / 0.05, return_index=True)
+
+        M = (self.velo2cam @ positions[0].T @ np.linalg.inv(positions[1].T)
+             @ np.linalg.inv(self.velo2cam)).T
+        xyz0_t = self.apply_transform(xyz0[sel0], M)
+        pcd0 = make_open3d_point_cloud(xyz0_t)
+        pcd1 = make_open3d_point_cloud(xyz1[sel1])
+        reg = o3d.registration.registration_icp(
+            pcd0, pcd1, 0.2, np.eye(4),
+            o3d.registration.TransformationEstimationPointToPoint(),
+            o3d.registration.ICPConvergenceCriteria(max_iteration=200))
+        pcd0.transform(reg.transformation)
+        # pcd0.transform(M2) or self.apply_transform(xyz0, M2)
+        M2 = M @ reg.transformation
+        # o3d.draw_geometries([pcd0, pcd1])
+        # write to a file
+        np.save(filename, M2)
+      else:
+        M2 = np.load(filename)
+      kaist_icp_cache[key] = M2
+    else:
+      M2 = kaist_icp_cache[key]
+
+    if self.random_rotation:
+      T0 = sample_random_trans(xyz0, self.randg, np.pi / 4)
+      T1 = sample_random_trans(xyz1, self.randg, np.pi / 4)
+      trans = T1 @ M2 @ np.linalg.inv(T0)
+
+      xyz0 = self.apply_transform(xyz0, T0)
+      xyz1 = self.apply_transform(xyz1, T1)
+    else:
+      trans = M2
+
+    matching_search_voxel_size = self.matching_search_voxel_size
+    if self.random_scale and random.random() < 0.95:
+      scale = self.min_scale + \
+          (self.max_scale - self.min_scale) * random.random()
+      matching_search_voxel_size *= scale
+      xyz0 = scale * xyz0
+      xyz1 = scale * xyz1
+
+    # Voxelization
+    xyz0_th = torch.from_numpy(xyz0)
+    xyz1_th = torch.from_numpy(xyz1)
+
+    sel0 = ME.utils.sparse_quantize(xyz0_th / self.voxel_size, return_index=True)
+    sel1 = ME.utils.sparse_quantize(xyz1_th / self.voxel_size, return_index=True)
+
+    # Make point clouds using voxelized points
+    pcd0 = make_open3d_point_cloud(xyz0[sel0])
+    pcd1 = make_open3d_point_cloud(xyz1[sel1])
+
+    # Get matches
+    matches = get_matching_indices(pcd0, pcd1, trans, matching_search_voxel_size)
+    if len(matches) < 1000:
+      raise ValueError(f"{drive}, {t0}, {t1}")
+
+    # Get features
+    npts0 = len(sel0)
+    npts1 = len(sel1)
+
+    feats_train0, feats_train1 = [], []
+
+    unique_xyz0_th = xyz0_th[sel0]
+    unique_xyz1_th = xyz1_th[sel1]
+
+    feats_train0.append(torch.ones((npts0, 1)))
+    feats_train1.append(torch.ones((npts1, 1)))
+
+    feats0 = torch.cat(feats_train0, 1)
+    feats1 = torch.cat(feats_train1, 1)
+
+    coords0 = torch.floor(unique_xyz0_th / self.voxel_size)
+    coords1 = torch.floor(unique_xyz1_th / self.voxel_size)
+
+    if self.transform:
+      coords0, feats0 = self.transform(coords0, feats0)
+      coords1, feats1 = self.transform(coords1, feats1)
+
+    return (unique_xyz0_th.float(), unique_xyz1_th.float(), coords0.int(),
+            coords1.int(), feats0.float(), feats1.float(), matches, trans)
+
+
+
+class KAISTRNMPairDataset(KAISTRPairDataset):
+  r"""
+  Generate KITTI pairs within N meter distance
+  """
+  MIN_DIST = 10
+
+  def __init__(self,
+               phase,
+               transform=None,
+               random_rotation=True,
+               random_scale=True,
+               manual_seed=False,
+               config=None):
+    if self.IS_ODOMETRY:
+      self.root = root = config.kaist_root
+      random_rotation = self.TEST_RANDOM_ROTATION
+    else:
+      self.date = config.kaist_date
+      self.root = root = os.path.join(config.kaist_root, self.date)
+
+    self.icp_path = os.path.join(config.kaist_root, 'icp')
+    pathlib.Path(self.icp_path).mkdir(parents=True, exist_ok=True)
+
+    PairDataset.__init__(self, phase, transform, random_rotation, random_scale,
+                         manual_seed, config)
+
+    logging.info(f"Loading the subset {phase} from {root}")
+
+    subset_names = open(self.DATA_FILES[phase]).read().split()
+    if self.IS_ODOMETRY:
+      for dirname in subset_names:
+        drive_id = int(dirname)
+        #print("Processing sequence ", drive_id)
+        self.kaist_interpolate(left=False,data_root=root,drive_id=drive_id)
+        load_path = root + '/%02d/' % drive_id + 'right_valid.csv'
+        valid_time = np.genfromtxt(load_path,delimiter=',')
+        fnames = []
+        for time in valid_time:
+          fnames.extend(glob.glob(self.root + '/%02d/VLP_right/' % drive_id + '%06d.bin' % time))
+        
+        assert len(fnames) > 0, f"Make sure that the path {root} has data {dirname}"
+        inames = sorted([int(os.path.split(fname)[-1][:-4]) for fname in fnames])
+        #print(inames)
+
+        all_odo = self.get_video_odometry(drive_id, return_all=True)
+        all_pos = np.array([self.odometry_to_positions(odo) for odo in all_odo])
+        #print("Odometry and position acquisition done")
+        Ts = all_pos[:, :3, 3]
+        pdist = (Ts.reshape(1, -1, 3) - Ts.reshape(-1, 1, 3))**2
+        pdist = np.sqrt(pdist.sum(-1))
+        valid_pairs = pdist > self.MIN_DIST
+        #print("Valid Pairs Generated")
+        curr_time = inames[0] - inames[0]
+        while curr_time in inames:
+          # Find the min index
+          next_time = np.where(valid_pairs[curr_time][curr_time:curr_time + 100])[0]
+          if len(next_time) == 0:
+            curr_time += 1
+          else:
+            # Follow https://github.com/yewzijian/3DFeatNet/blob/master/scripts_data_processing/kitti/process_kitti_data.m#L44
+            next_time = next_time[0] + curr_time - 1
+
+          if next_time in inames:
+            self.files.append((drive_id, curr_time + inames[0], next_time + inames[0]))
+            curr_time = next_time + 1
+    else:
+      for dirname in subset_names:
+        drive_id = int(dirname)
+        fnames = glob.glob(root + '/' + self.date +
+                           '_drive_%04d_sync/velodyne_points/data/*.bin' % drive_id)
+        assert len(fnames) > 0, f"Make sure that the path {root} has data {dirname}"
+        inames = sorted([int(os.path.split(fname)[-1][:-4]) for fname in fnames])
+
+        all_odo = self.get_video_odometry(drive_id, return_all=True)
+        all_pos = np.array([self.odometry_to_positions(odo) for odo in all_odo])
+        Ts = all_pos[:, 0, :3]
+
+        pdist = (Ts.reshape(1, -1, 3) - Ts.reshape(-1, 1, 3))**2
+        pdist = np.sqrt(pdist.sum(-1))
+
+        for start_time in inames:
+          pair_time = np.where(
+              pdist[start_time][start_time:start_time + 100] > self.MIN_DIST)[0]
+          if len(pair_time) == 0:
+            continue
+          else:
+            pair_time = pair_time[0] + start_time
+
+          if pair_time in inames:
+            self.files.append((drive_id, start_time, pair_time))
+
+  def kaist_interpolate(self,left=True,data_root=None,drive_id=None):
+    pose_path = data_root + '/' + '%02d/' % drive_id + 'global_pose.csv'
+    pose = np.genfromtxt(pose_path,delimiter=',')
+    if left == True:
+      stamp_path = data_root + '/' + '%02d/' % drive_id + 'VLP_left_stamp.csv'
+      write_VLP_path = data_root + '/' + '%02d/' % drive_id + 'VLP_left_pose.csv'
+      write_valid_path = data_root + '/' + '%02d/' % drive_id + 'left_valid.csv'
+      time_stamp = np.genfromtxt(stamp_path,delimiter=',')
+    else: 
+      stamp_path = data_root + '/' + '%02d/' % drive_id + 'VLP_right_stamp.csv'
+      write_VLP_path = data_root + '/' + '%02d/' % drive_id + 'VLP_right_pose.csv'
+      write_valid_path = data_root + '/' + '%02d/' % drive_id + 'right_valid.csv'
+      time_stamp = np.genfromtxt(stamp_path,delimiter=',')
+
+    time = pose[:,0]
+    pose = pose[:,1:13]
+
+    pose = pose.reshape(-1,3,4)
+    rotate = pose[:,:,0:3]
+    translation = pose[:,:,3]
+
+    valid_start = (time_stamp > np.min(time)).astype(int)
+    valid_end = (time_stamp < np.max(time)).astype(int)
+    valid_idx = np.where(valid_start*valid_end == 1)
+    valid_time = time_stamp[valid_idx]
+
+    # interpolate translation matrix
+    trans_interpolate = interp1d(time,translation,kind='linear',axis=0)
+    trans = trans_interpolate(valid_time).reshape(valid_time.shape[0],3,1)
+
+    # interpolate rotation matrix
+    slerp = Slerp(time,R.from_matrix(rotate))
+    rotate = slerp(valid_time).as_matrix()
+
+    VLP_pose = np.concatenate((rotate,trans),axis=2).reshape(valid_time.shape[0],12)
+
+    valid_idx = np.asarray(valid_idx).T
+    np.savetxt(write_VLP_path,VLP_pose,delimiter=',')
+    np.savetxt(write_valid_path,valid_idx,delimiter=',')  
+    
+    return 
+
+    #if self.IS_ODOMETRY:
+      # Remove problematic sequence
+     # for item in [
+     #     (8, 15, 58),
+     # ]:
+     #   print("items are ",item)
+     #   if item in self.files:
+     #     self.files.pop(self.files.index(item))
 
 
 class ThreeDMatchPairDataset(IndoorPairDataset):
@@ -582,7 +1507,8 @@ class ThreeDMatchPairDataset(IndoorPairDataset):
   }
 
 
-ALL_DATASETS = [ThreeDMatchPairDataset, KITTIPairDataset, KITTINMPairDataset]
+ALL_DATASETS = [ThreeDMatchPairDataset, KITTIPairDataset, KITTINMPairDataset,KAISTLNMPairDataset
+                ,KAISTRNMPairDataset,KAISTLPairDataset,KAISTRPairDataset]
 dataset_str_mapping = {d.__name__: d for d in ALL_DATASETS}
 
 
@@ -611,6 +1537,8 @@ def make_data_loader(config, phase, batch_size, num_threads=0, shuffle=None):
       random_scale=use_random_scale,
       random_rotation=use_random_rotation,
       config=config)
+
+  #print(dset[0].files)
 
   loader = torch.utils.data.DataLoader(
       dset,

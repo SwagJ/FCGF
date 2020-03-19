@@ -24,7 +24,7 @@ logging.basicConfig(
 
 def main(config):
   test_loader = make_data_loader(
-      config, config.test_phase, 1, num_threads=config.test_num_workers, shuffle=True)
+      config, config.test_phase, 1, num_threads=config.test_num_thread, shuffle=True)
 
   num_feats = 1
 
@@ -37,7 +37,7 @@ def main(config):
       bn_momentum=config.bn_momentum,
       conv1_kernel_size=config.conv1_kernel_size,
       normalize_feature=config.normalize_feature)
-  checkpoint = torch.load(config.save_dir + '/checkpoint.pth')
+  checkpoint = torch.load(config.save_dir + '/KITTI-v0.3-ResUNetBN2C-conv1-5-nout32.pth')
   model.load_state_dict(checkpoint['state_dict'])
   model = model.to(device)
   model.eval()

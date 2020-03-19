@@ -82,6 +82,7 @@ class AlignmentTrainer:
     self.checkpoint_dir = config.out_dir
 
     ensure_dir(self.checkpoint_dir)
+    print(config)
     json.dump(
         config,
         open(os.path.join(self.checkpoint_dir, 'config.json'), 'w'),
