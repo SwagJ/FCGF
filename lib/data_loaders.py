@@ -170,8 +170,8 @@ class IndoorPairDataset(PairDataset):
   def __getitem__(self, idx):
     file0 = os.path.join(self.root, self.files[idx][0])
     file1 = os.path.join(self.root, self.files[idx][1])
-    data0 = np.load(file0)
-    data1 = np.load(file1)
+    data0 = np.load(file0,allow_pickle=True)
+    data1 = np.load(file1,allow_pickle=True)
     xyz0 = data0["pcd"]
     xyz1 = data1["pcd"]
     color0 = data0["color"]
@@ -425,7 +425,7 @@ class KITTIPairDataset(PairDataset):
         # write to a file
         np.save(filename, M2)
       else:
-        M2 = np.load(filename)
+        M2 = np.load(filename,allow_pickle=True)
       kitti_icp_cache[key] = M2
     else:
       M2 = kitti_icp_cache[key]
@@ -792,7 +792,7 @@ class KAISTLPairDataset(PairDataset):
         # write to a file
         np.save(filename, M2)
       else:
-        M2 = np.load(filename)
+        M2 = np.load(filename,allow_pickle=True)
       kaist_icp_cache[key] = M2
     else:
       M2 = kaist_icp_cache[key]
@@ -1039,7 +1039,7 @@ class KAISTLNMPairDataset(KAISTLPairDataset):
         # write to a file
         np.save(filename, M2)
       else:
-        M2 = np.load(filename)
+        M2 = np.load(filename,allow_pickle=True)
       kitti_icp_cache[key] = M2
     else:
       M2 = kitti_icp_cache[key]
@@ -1289,7 +1289,7 @@ class KAISTRPairDataset(PairDataset):
         # write to a file
         np.save(filename, M2)
       else:
-        M2 = np.load(filename)
+        M2 = np.load(filename,allow_pickle=True)
       kaist_icp_cache[key] = M2
     else:
       M2 = kaist_icp_cache[key]
