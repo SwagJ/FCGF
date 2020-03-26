@@ -1039,7 +1039,7 @@ class KAISTLNMPairDataset(KAISTLPairDataset):
         # write to a file
         np.save(filename, M2)
       else:
-        M2 = np.load(filename)
+        M2 = np.load(filename,allow_pickle=True)
       kitti_icp_cache[key] = M2
     else:
       M2 = kitti_icp_cache[key]

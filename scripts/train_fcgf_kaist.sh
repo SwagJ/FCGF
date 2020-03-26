@@ -18,10 +18,10 @@ export CONV1_KERNEL_SIZE=${CONV1_KERNEL_SIZE:-5}
 export EXP_GAMMA=${EXP_GAMMA:-0.99}
 export RANDOM_SCALE=${RANDOM_SCALE:-True}
 export TIME=$(date +"%Y-%m-%d_%H-%M-%S")
-export KAIST_PATH=${KAIST_PATH:-/disk_ssd/kaist}
+export KAIST_PATH=${KAIST_PATH:-/cluster/scratch/majing/kaist}
 export VERSION=$(git rev-parse HEAD)
 
-export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/${OPTIMIZER}-lr${LR}-e${MAX_EPOCH}-b${BATCH_SIZE}i${ITER_SIZE}-modelnout${MODEL_N_OUT}${PATH_POSTFIX}/${TIME}
+export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/${TIME}
 
 export PYTHONUNBUFFERED="True"
 
@@ -40,7 +40,9 @@ echo "" | tee -a $LOG
 git diff | tee -a $LOG
 echo "" | tee -a $LOG
 nvidia-smi | tee -a $LOG
-
+module load eth_proxy gcc/6.3.0 python_gpu/3.7.4 cuda/10.1.243 openblas/0.2.19
+pip install --upgrade --user torch torchvision
+pip install --upgrade --user numpy
 # Training
 python train.py \
 	--dataset ${DATASET} \
