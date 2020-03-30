@@ -1,0 +1,35 @@
+Sender: LSF System <lsfadmin@lo-dgx1-002>
+Subject: Job 5571117: <bash> in cluster <leonhard> Done
+
+Job <bash> was submitted from host <lo-login-02> by user <majing> in cluster <leonhard> at Mon Mar 30 12:30:01 2020
+Job was executed on host(s) <8*lo-dgx1-002>, in queue <gpu.24h>, as user <majing> in cluster <leonhard> at Mon Mar 30 12:30:20 2020
+</cluster/home/majing> was used as the home directory.
+</cluster/scratch/majing/FCGF> was used as the working directory.
+Started at Mon Mar 30 12:30:20 2020
+Terminated at Mon Mar 30 12:30:22 2020
+Results reported at Mon Mar 30 12:30:22 2020
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+bash
+------------------------------------------------------------
+
+Successfully completed.
+
+Resource usage summary:
+
+    CPU time :                                   0.23 sec.
+    Max Memory :                                 6 MB
+    Average Memory :                             -
+    Total Requested Memory :                     36000.00 MB
+    Delta Memory :                               35994.00 MB
+    Max Swap :                                   -
+    Max Processes :                              -
+    Max Threads :                                -
+    Run time :                                   2 sec.
+    Turnaround time :                            21 sec.
+
+The output (if any) follows:
+
