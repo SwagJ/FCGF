@@ -40,9 +40,19 @@ echo "" | tee -a $LOG
 git diff | tee -a $LOG
 echo "" | tee -a $LOG
 nvidia-smi | tee -a $LOG
+
+
 module load eth_proxy gcc/6.3.0 python_gpu/3.7.4 cuda/10.1.243 openblas/0.2.19
 pip install --upgrade --user torch torchvision
 pip install --upgrade --user numpy
+#installing MinkowskiEngine
+export BLAS_INCLUDE_DIRS=$OPENBLAS_ROOT/include
+export BLAS_LIBRARY_DIRS=$OPENBLAS_ROOT/lib
+cd /cluster/scratch/majing/FCGF/MinkowskiEngine
+python setup.py install --blas=openblas --user --keep_objs
+cd /cluster/scratch/majing/FCGF/
+
+
 # Training
 python train.py \
 	--dataset ${DATASET} \
