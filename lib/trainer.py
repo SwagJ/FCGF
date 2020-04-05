@@ -37,14 +37,34 @@ class AlignmentTrainer:
     num_feats = 1  # occupancy only for 3D Match dataset. For ScanNet, use RGB 3 channels.
 
     # Model initialization
+    self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     Model = load_model(config.model)
-    model = Model(
+    if config.backbone_model is not None:
+      self.backbone_model = load_model(config.backbone_model)
+      model = Model(
+        self.device,
+        config.batch_size,
+        0.25/config.voxel_size,
+        num_feats,
+        config.model_n_out,
+        bn_momentum=config.bn_momentum,
+        normalize_feature=config.normalize_feature,
+        conv1_kernel_size=config.conv1_kernel_size,
+        backbone_model=self.backbone_model,
+        D=3)
+      self.model = model
+      self.model = self.model.to(self.device)
+    else:
+      model = Model(
         num_feats,
         config.model_n_out,
         bn_momentum=config.bn_momentum,
         normalize_feature=config.normalize_feature,
         conv1_kernel_size=config.conv1_kernel_size,
         D=3)
+      self.model = model
+      self.model = self.model.to(self.device)
 
     if config.weights:
       checkpoint = torch.load(config.weights)
@@ -53,7 +73,6 @@ class AlignmentTrainer:
     logging.info(model)
 
     self.config = config
-    self.model = model
     self.max_epoch = config.max_epoch
     self.save_freq = config.save_freq_epoch
     self.val_max_iter = config.val_max_iter
@@ -62,13 +81,12 @@ class AlignmentTrainer:
     self.best_val_metric = config.best_val_metric
     self.best_val_epoch = -np.inf
     self.best_val = -np.inf
+    #self.backbone_model = config.backbone_model
 
     if config.use_gpu and not torch.cuda.is_available():
       logging.warning('Warning: There\'s no CUDA support on this machine, '
                       'training is performed on CPU.')
       raise ValueError('GPU not available, but cuda flag set')
-
-    self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     self.optimizer = getattr(optim, config.optimizer)(
         model.parameters(),
@@ -98,6 +116,7 @@ class AlignmentTrainer:
     self.log_step = int(np.sqrt(self.config.batch_size))
     self.model = self.model.to(self.device)
     self.writer = SummaryWriter(logdir=config.out_dir)
+    #logging.info(f"num_pos is {config.triplet_num_pos}")
 
     if config.resume is not None:
       if osp.isfile(config.resume):
@@ -126,6 +145,7 @@ class AlignmentTrainer:
 
       for k, v in val_dict.items():
         self.writer.add_scalar(f'val/{k}', v, 0)
+
 
     for epoch in range(self.start_epoch, self.max_epoch + 1):
       lr = self.scheduler.get_lr()
@@ -478,6 +498,7 @@ class HardestContrastiveLossTrainer(ContrastiveLossTrainer):
         F1 = self.model(sinput1).F
 
         pos_pairs = input_dict['correspondences']
+        #print(np.shape(input_dict['correspondences']))
         pos_loss, neg_loss = self.contrastive_hardest_negative_loss(
             F0,
             F1,
@@ -549,25 +570,34 @@ class TripletLossTrainer(ContrastiveLossTrainer):
     if not isinstance(positive_pairs, np.ndarray):
       positive_pairs = np.array(positive_pairs, dtype=np.int64)
 
+    #logging.info(f"pos_Pairs: {np.shape(positive_pairs)}")
+    #logging.info(f"hash_key_shape: {np.shape(hash_seed)}")
     pos_keys = _hash(positive_pairs, hash_seed)
+    #logging.info(f"pos_keys_shape: {np.shape(pos_keys)}")
     pos_dist = torch.sqrt((posF0 - posF1).pow(2).sum(1) + 1e-7)
 
     # Random triplets
     rand_inds = np.random.choice(
         num_pos_pairs, min(num_pos_pairs, num_rand_triplet), replace=False)
+    ##logging.info(f"rand_inds dim: {rand_inds.shape}")
     rand_pairs = positive_pairs[rand_inds]
+    #ogging.info(f"rand_pairs dim: {rand_pairs.shape}")
     negatives = np.random.choice(N1, min(N1, num_rand_triplet), replace=False)
 
     # Remove positives from negatives
     rand_neg_keys = _hash([rand_pairs[:, 0], negatives], hash_seed)
     rand_mask = np.logical_not(np.isin(rand_neg_keys, pos_keys, assume_unique=False))
     anchors, positives = rand_pairs[torch.from_numpy(rand_mask)].T
+    #logging.info(f"anchors and rand_pairs:{anchors.data == rand_pairs[:,0]}")
+   #logging.info(f"anchors size: {anchors.size}")
+    #logging.info(f"positives size: {positives.size}")
     negatives = negatives[rand_mask]
 
     rand_pos_dist = torch.sqrt((F0[anchors] - F1[positives]).pow(2).sum(1) + 1e-7)
     rand_neg_dist = torch.sqrt((F0[anchors] - F1[negatives]).pow(2).sum(1) + 1e-7)
 
     loss = F.relu(rand_pos_dist + self.neg_thresh - rand_neg_dist).mean()
+    #logging.info(f"loss dim:{np.shape(loss)}")
 
     return loss, pos_dist.mean(), rand_neg_dist.mean()
 
@@ -600,12 +630,14 @@ class TripletLossTrainer(ContrastiveLossTrainer):
         sinput0 = ME.SparseTensor(
             input_dict['sinput0_F'], coords=input_dict['sinput0_C']).to(self.device)
         F0 = self.model(sinput0).F
+        logging.info(f"coord shape:{np.shape(self.model(sinput0).C)}")
 
         sinput1 = ME.SparseTensor(
             input_dict['sinput1_F'], coords=input_dict['sinput1_C']).to(self.device)
         F1 = self.model(sinput1).F
 
         pos_pairs = input_dict['correspondences']
+        logging.info(f"pair max:{torch.max(pos_pairs[:,0])}")
         loss, pos_dist, neg_dist = self.triplet_loss(
             F0,
             F1,
@@ -720,3 +752,152 @@ class HardestTripletLossTrainer(TripletLossTrainer):
         ])).mean()
 
     return loss, pos_dist.mean(), (D01min.mean() + D10min.mean()).item() / 2
+
+class JointTripletLossTrainer(ContrastiveLossTrainer):
+
+  def joint_loss(self,
+                   F0,
+                   F1,
+                   score0,
+                   score1,
+                   positive_pairs,
+                   len_batch,
+                   batch_size,
+                   num_pos=1024,
+                   num_hn_samples=None,
+                   num_rand_triplet=1024,
+                   ):
+    """
+    Generate negative pairs
+    """
+    N0, N1 = len(F0), len(F1)
+    N_pos_pairs = len(positive_pairs)
+    hash_seed = max(N0, N1)
+    sel0 = np.random.choice(N0, min(N0, num_hn_samples), replace=False)
+    sel1 = np.random.choice(N1, min(N1, num_hn_samples), replace=False)
+
+    if N_pos_pairs > num_pos:
+      pos_sel = np.random.choice(N_pos_pairs, num_pos, replace=False)
+      sample_pos_pairs = positive_pairs[pos_sel]
+    else:
+      sample_pos_pairs = positive_pairs
+
+    # Find negatives for all F1[positive_pairs[:, 1]]
+    subF0, subF1 = F0[sel0], F1[sel1]
+
+    pos_ind0 = sample_pos_pairs[:, 0].long()
+    pos_ind1 = sample_pos_pairs[:, 1].long()
+    posF0, posF1 = F0[pos_ind0], F1[pos_ind1]
+
+    # compute score for pairs
+    pos_score = score0[pos_ind0]*score1[pos_ind1]
+    pos_score_norm = pos_score/torch.sum(pos_score)
+
+    D01 = pdist(posF0, subF1, dist_type='L2')
+    D10 = pdist(posF1, subF0, dist_type='L2')
+
+    D01min, D01ind = D01.min(1)
+    D10min, D10ind = D10.min(1)
+
+    if not isinstance(positive_pairs, np.ndarray):
+      positive_pairs = np.array(positive_pairs, dtype=np.int64)
+
+    pos_keys = _hash(positive_pairs, hash_seed)
+
+    D01ind = sel1[D01ind.cpu().numpy()]
+    D10ind = sel0[D10ind.cpu().numpy()]
+    neg_keys0 = _hash([pos_ind0.numpy(), D01ind], hash_seed)
+    neg_keys1 = _hash([D10ind, pos_ind1.numpy()], hash_seed)
+
+    mask0 = torch.from_numpy(
+        np.logical_not(np.isin(neg_keys0, pos_keys, assume_unique=False)))
+    mask1 = torch.from_numpy(
+        np.logical_not(np.isin(neg_keys1, pos_keys, assume_unique=False)))
+
+    pos_loss = F.relu((posF0 - posF1).pow(2).sum(1) - self.pos_thresh)
+    neg_loss0 = F.relu(self.neg_thresh - D01min[mask0]).pow(2)
+    neg_loss1 = F.relu(self.neg_thresh - D10min[mask1]).pow(2)
+    loss = F.relu(pos_loss + (neg_loss0 + neg_loss1)) * pos_score_norm
+    return loss.mean(), (neg_loss0.mean() + neg_loss1.mean()) / 2, pos_loss.mean()
+
+  def _train_epoch(self, epoch):
+    config = self.config
+
+    gc.collect()
+    self.model.train()
+
+    # Epoch starts from 1
+    total_loss = 0
+    total_num = 0.0
+    data_loader = self.data_loader
+    data_loader_iter = self.data_loader.__iter__()
+    iter_size = self.iter_size
+    data_meter, data_timer, total_timer = AverageMeter(), Timer(), Timer()
+    pos_dist_meter, neg_dist_meter = AverageMeter(), AverageMeter()
+    start_iter = (epoch - 1) * (len(data_loader) // iter_size)
+    for curr_iter in range(len(data_loader) // iter_size):
+      self.optimizer.zero_grad()
+      batch_loss = 0
+      data_time = 0
+      total_timer.tic()
+      for iter_idx in range(iter_size):
+        data_timer.tic()
+        input_dict = data_loader_iter.next()
+        data_time += data_timer.toc(average=False)
+
+        # pairs consist of (xyz1 index, xyz0 index)
+        #logging.info(f"self.device is {self.device}")
+        len_batch = input_dict['len_batch']
+        sinput0 = ME.SparseTensor(
+            input_dict['sinput0_F'], coords=input_dict['sinput0_C']).to(self.device)
+        #logging.info(f"sinput0 device is {sinput0.device}")
+        #logging.info(f"model device is {next(self.model.parameters()).is_cuda}")
+
+        sinput1 = ME.SparseTensor(
+            input_dict['sinput1_F'], coords=input_dict['sinput1_C']).to(self.device)
+
+        out = self.model(sinput0,sinput1,len_batch)
+        pos_pairs = input_dict['correspondences']
+
+        loss, neg_dist, pos_dist = self.joint_loss(
+            out['feature0'],
+            out['feature1'],
+            out['score0'],
+            out['score1'],
+            pos_pairs,
+            len_batch = input_dict['len_batch'],
+            batch_size = config.batch_size,
+            num_pos=config.triplet_num_pos * config.batch_size,
+            num_hn_samples=config.triplet_num_hn * config.batch_size,
+            num_rand_triplet=config.triplet_num_rand * config.batch_size,
+            )
+        logging.info(f"This batch Done")
+        loss /= iter_size
+        loss.backward()
+        batch_loss += loss.item()
+        pos_dist_meter.update(pos_dist)
+        neg_dist_meter.update(neg_dist)
+
+      self.optimizer.step()
+      gc.collect()
+
+      torch.cuda.empty_cache()
+
+      total_loss += batch_loss
+      total_num += 1.0
+      total_timer.toc()
+      data_meter.update(data_time)
+
+      if curr_iter % self.config.stat_freq == 0:
+        self.writer.add_scalar('train/loss', batch_loss, start_iter + curr_iter)
+        logging.info(
+            "Train Epoch: {} [{}/{}], Current Loss: {:.3e}, Pos dist: {:.3e}, Neg dist: {:.3e}"
+            .format(epoch, curr_iter,
+                    len(self.data_loader) //
+                    iter_size, batch_loss, pos_dist_meter.avg, neg_dist_meter.avg) +
+            "\tData time: {:.4f}, Train time: {:.4f}, Iter time: {:.4f}".format(
+                data_meter.avg, total_timer.avg - data_meter.avg, total_timer.avg))
+        pos_dist_meter.reset()
+        neg_dist_meter.reset()
+        data_meter.reset()
+        total_timer.reset()

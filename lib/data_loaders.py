@@ -80,8 +80,11 @@ def collate_pair_fn(list_data):
       'sinput1_C': coords_batch1,
       'sinput1_F': feats_batch1.float(),
       'correspondences': matching_inds_batch,
+      'matching_inds': matching_inds,
       'T_gt': trans_batch,
-      'len_batch': len_batch
+      'len_batch': len_batch,
+      'N0': N0,
+      'N1': N1
   }
 
 
