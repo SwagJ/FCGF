@@ -4,15 +4,16 @@ export MISC_ARGS=$2
 
 export DATA_ROOT="./outputs"
 export DATASET=${DATASET:-KITTINMPairDataset}
-export TRAINER=${TRAINER:-HardestContrastiveLossTrainer}
-export MODEL=${MODEL:-ResUNetBN2C}
+export TRAINER=${TRAINER:-JointLossTrainer}
+export MODEL=${MODEL:-JointNet}
+export BACKBONE=${BACKBONE:-ResUNetBN2C}
 export MODEL_N_OUT=${MODEL_N_OUT:-16}
 export OPTIMIZER=${OPTIMIZER:-SGD}
 export LR=${LR:-1e-1}
 export MAX_EPOCH=${MAX_EPOCH:-200}
 export BATCH_SIZE=${BATCH_SIZE:-8}
 export ITER_SIZE=${ITER_SIZE:-1}
-export VOXEL_SIZE=${VOXEL_SIZE:-0.3}
+export VOXEL_SIZE=${VOXEL_SIZE:-0.2}
 export POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER=${POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER:-1.5}
 export CONV1_KERNEL_SIZE=${CONV1_KERNEL_SIZE:-5}
 export EXP_GAMMA=${EXP_GAMMA:-0.99}
@@ -56,6 +57,7 @@ python train.py \
 	--dataset ${DATASET} \
 	--trainer ${TRAINER} \
 	--model ${MODEL} \
+	--backbone_model ${BACKBONE} \
 	--model_n_out ${MODEL_N_OUT} \
 	--conv1_kernel_size ${CONV1_KERNEL_SIZE} \
 	--optimizer ${OPTIMIZER} \
