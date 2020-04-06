@@ -4,8 +4,9 @@ export MISC_ARGS=$2
 
 export DATA_ROOT="./outputs"
 export DATASET=${DATASET:-KITTINMPairDataset}
-export TRAINER=${TRAINER:-HardestContrastiveLossTrainer}
-export MODEL=${MODEL:-ResUNetBN2C}
+export TRAINER=${TRAINER:-JointLossTrainer}
+export BACKBONE=${BACKBONE:-ResUNetBN2C}
+export MODEL=${MODEL:-JointNet}
 export MODEL_N_OUT=${MODEL_N_OUT:-16}
 export OPTIMIZER=${OPTIMIZER:-SGD}
 export LR=${LR:-1e-1}
@@ -56,6 +57,7 @@ python train.py \
 	--dataset ${DATASET} \
 	--trainer ${TRAINER} \
 	--model ${MODEL} \
+	--backbone_model ${BACKBONE} \
 	--model_n_out ${MODEL_N_OUT} \
 	--conv1_kernel_size ${CONV1_KERNEL_SIZE} \
 	--optimizer ${OPTIMIZER} \

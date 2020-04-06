@@ -902,7 +902,9 @@ class JointLossTrainer(ContrastiveLossTrainer):
         data_meter.reset()
         total_timer.reset()
 
-  self.model.eval()
+  def _valid_epoch(self):
+    # Change the network to evaluation mode
+    self.model.eval()
     self.val_data_loader.dataset.reset_seed(0)
     num_data = 0
     hit_ratio_meter, feat_match_ratio, loss_meter, rte_meter, rre_meter = AverageMeter(
@@ -922,13 +924,14 @@ class JointLossTrainer(ContrastiveLossTrainer):
       feat_timer.tic()
       sinput0 = ME.SparseTensor(
           input_dict['sinput0_F'], coords=input_dict['sinput0_C']).to(self.device)
+      #F0 = self.model(sinput0).F
 
       sinput1 = ME.SparseTensor(
           input_dict['sinput1_F'], coords=input_dict['sinput1_C']).to(self.device)
       out = self.model(sinput0,sinput1,len_batch)
-      F0 = out['feature0']
-      F1 = out['feature1'] 
       feat_timer.toc()
+      F0 = out['feature0']
+      F1 = out['feature1']
 
       matching_timer.tic()
       xyz0, xyz1, T_gt = input_dict['pcd0'], input_dict['pcd1'], input_dict['T_gt']
