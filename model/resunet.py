@@ -251,27 +251,20 @@ class ResUNetIN2E(ResUNetBN2E):
 class Detection(nn.Module):
   # To use the model, must call initialize_coords before forward pass.
   # Once data is processed, call clear to reset the model before calling initialize_coords
-  def __init__(self,batch_size,radius=10,device='cpu'):
+  def __init__(self,radius=10,device='cpu'):
     super(Detection, self).__init__()
-
-    self.batch_size = batch_size
-    self.radius = radius
     self.device = device
-    self.pdist = nn.PairwiseDistance(p=2)
     #self.len_batch = len_batch
 
 
-  def forward(self,coords,features):
+  def forward(self,coords,features,len_batch):
     #point_len = self.len_batch
-    batch_size = self.batch_size
     device = self.device
-    radius = self.radius
 
     score = torch.Tensor()
-    for i in range(batch_size):
+    for i in range(len_batch):
       score = torch.cat((score,self._detection_score(coords=coords[i],
                                          feature=features[i],
-                                         radius=radius,
                                          device=device)),0
                   )
       print(score.shape)
@@ -280,7 +273,7 @@ class Detection(nn.Module):
     return score
 
 
-  def _detection_score(self,coords=None,feature=None,radius=None,device=None):
+  def _detection_score(self,coords=None,feature=None,device=None):
     #find all points in a cube whose center is the point
     #get alpha score in feature map k
     feature = F.relu(feature)
@@ -294,7 +287,7 @@ class Detection(nn.Module):
     every_dist = (((coords_confusion[:, :, 0, :] - coords_confusion[:, :, 1, :]) ** 2).sum(dim=2) ** 0.5).float16()
 
 
-    neighbors = (torch.topk(every_dist,9,largest=False,dim=1).indices).short()
+    neighbors = (torch.topk(every_dist,1,largest=False,dim=1).indices).short()
     neighbor9_feature = (feature[:,neighbors])[0]
     exp_feature = torch.exp(feature)
     exp_neighbor = torch.sum(torch.exp(neighbor9_feature),dim=1)
@@ -349,13 +342,14 @@ class JointNet(nn.Module):
                               conv1_kernel_size=conv1_kernel_size,
                               D=3)#.to(device)
 
-    self.detection0 = Detection(batch_size,radius,device=device)
-    self.detection1 = Detection(batch_size,radius,device=device)
+    self.detection0 = Detection(device=device)
+    self.detection1 = Detection(device=device)
 
   def forward(self,x0,x1,len_batch):
     #x0 = x0.to(self.device)
     #x1 = x1.to(self.device)
     #logging.info(f"input device:{x0.F.device}")
+    print(len_batch)
     sparse0 = self.feature_extraction0(x0)
     sparse1 = self.feature_extraction1(x1)
     logging.info(f"Feature Extraction Done")
@@ -369,7 +363,7 @@ class JointNet(nn.Module):
     batch_C1, batch_F1 = [],[]
     batch_C0, batch_F0 = [],[]
     start_idx = np.zeros((2,),dtype=int)
-    for i in range(self.batch_size):
+    for i in range(len(len_batch)):
       end_idx = start_idx + np.array(len_batch[i],dtype=int)
       print(start_idx,end_idx)
       #logging.info(f"Before append device:{sparse0.C.device}")
@@ -386,8 +380,8 @@ class JointNet(nn.Module):
 
     logging.info(f"Coord_seperation Done")
     #logging.info(f"After append device:{batch_C0[i].device}")
-    score0 = self.detection0(batch_C0,batch_F0)
-    score1 = self.detection1(batch_C1,batch_F1)
+    score0 = self.detection0(batch_C0,batch_F0,len(len_batch))
+    score1 = self.detection1(batch_C1,batch_F1,len(len_batch))
 
     return{
      'feature0': sparse0,
