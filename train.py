@@ -34,7 +34,7 @@ def get_trainer(trainer):
   elif trainer == 'HardestTripletLossTrainer':
     return HardestTripletLossTrainer
   elif trainer == 'JointLossTrainer':
-    return JointTripletLossTrainer
+    return JointLossTrainer
   else:
     raise ValueError(f'Trainer {trainer} not found')
 
