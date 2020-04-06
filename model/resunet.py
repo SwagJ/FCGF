@@ -279,24 +279,31 @@ class Detection(nn.Module):
     feature = F.relu(feature)
     max_local = torch.max(feature,dim=1)[0]
     beta = feature/max_local.unsqueeze(1)
+    del max_local
     logging.info(f"Beta Done")
 
     coords_A = (coords.view(coords.shape[0], 1, 3).repeat(1, coords.shape[0], 1)).short()
     coords_B = (coords.view(1, coords.shape[0], 3).repeat(coords.shape[0], 1, 1)).short()
-    coords_confusion = (torch.stack((coords_A, coords_B), dim=2)).short
-    every_dist = (((coords_confusion[:, :, 0, :] - coords_confusion[:, :, 1, :]) ** 2).sum(dim=2) ** 0.5).float16()
+    coords_confusion = (torch.stack((coords_A, coords_B), dim=2)).short()
+    del coords_A,coords_B
+    every_dist = (((coords_confusion[:, :, 0, :] - coords_confusion[:, :, 1, :]) ** 2).sum(dim=2) ** 0.5)
 
 
-    neighbors = (torch.topk(every_dist,1,largest=False,dim=1).indices).short()
-    neighbor9_feature = (feature[:,neighbors])[0]
+    neighbors = (torch.topk(every_dist,1,largest=False,dim=1).indices)
+    del every_dist
+    neighbor9_feature = (feature[neighbors,:])[0]
+    del neighbors
     exp_feature = torch.exp(feature)
-    exp_neighbor = torch.sum(torch.exp(neighbor9_feature),dim=1)
+    exp_neighbor = torch.sum(torch.exp(neighbor9_feature),dim=0)
     alpha = exp_feature/exp_neighbor
+    del exp_feature,exp_neighbor
     logging.info(f"Alpha Done")
 
-    gamma = torch.max(alpha*beta,dim=1)
+    gamma = torch.max(alpha*beta,dim=1).values
+    del alpha,beta
     logging.info(f"Gamma Done, gamma dimension{gamma.shape}")
     score = gamma/torch.norm(gamma)
+    del gamma
 
     return score
 
