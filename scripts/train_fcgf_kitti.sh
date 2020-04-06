@@ -2,7 +2,7 @@
 export PATH_POSTFIX=$1
 export MISC_ARGS=$2
 
-export DATA_ROOT="./outputs/Experiments"
+export DATA_ROOT="./outputs"
 export DATASET=${DATASET:-KITTINMPairDataset}
 export TRAINER=${TRAINER:-HardestContrastiveLossTrainer}
 export MODEL=${MODEL:-ResUNetBN2C}
@@ -21,8 +21,8 @@ export TIME=$(date +"%Y-%m-%d_%H-%M-%S")
 export KITTI_PATH=${KITTI_PATH:-/cluster/scratch/majing/kitti/}
 export VERSION=$(git rev-parse HEAD)
 
-export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/${OPTIMIZER}-lr${LR}-e${MAX_EPOCH}-b${BATCH_SIZE}i${ITER_SIZE}-modelnout${MODEL_N_OUT}${PATH_POSTFIX}/${TIME}
-
+export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/modelnout${MODEL_N_OUT}
+export RESUME=None #${OUT_DIR} 
 export PYTHONUNBUFFERED="True"
 
 echo $OUT_DIR
@@ -45,6 +45,12 @@ module load eth_proxy gcc/6.3.0 python_gpu/3.7.4 cuda/10.1.243 openblas/0.2.19
 pip install --upgrade --user torch torchvision
 pip install --upgrade --user numpy
 
+export BLAS_INCLUDE_DIRS=$OPENBLAS_ROOT/include
+export BLAS_LIBRARY_DIRS=$OPENBLAS_ROOT/lib
+cd /cluster/scratch/majing/FCGF/MinkowskiEngine
+python setup.py install --blas=openblas --user --keep_objs
+cd /cluster/scratch/majing/FCGF/
+
 # Training
 python train.py \
 	--dataset ${DATASET} \
@@ -64,6 +70,7 @@ python train.py \
 	--kitti_root ${KITTI_PATH} \
 	--hit_ratio_thresh 0.3 \
 	--icp_cache_path "/disk/kitti/icp" \
+	--resume ${RESUME} \
 	$MISC_ARGS 2>&1 | tee -a $LOG
 
 # Test

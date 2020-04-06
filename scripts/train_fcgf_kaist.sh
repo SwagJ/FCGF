@@ -21,7 +21,8 @@ export TIME=$(date +"%Y-%m-%d_%H-%M-%S")
 export KAIST_PATH=${KAIST_PATH:-/cluster/scratch/majing/kaist}
 export VERSION=$(git rev-parse HEAD)
 
-export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/${TIME}
+export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/modelnout${MODEL_N_OUT}
+export RESUME=None #${OUT_DIR} 
 
 export PYTHONUNBUFFERED="True"
 
@@ -62,6 +63,7 @@ python train.py \
 	--kaist_root ${KAIST_PATH} \
 	--hit_ratio_thresh 0.3 \
 	--icp_cache_path "/disk/kaist/icp" \
+	--resume ${RESUME} \
 	$MISC_ARGS 2>&1 | tee -a $LOG
 
 # Test
