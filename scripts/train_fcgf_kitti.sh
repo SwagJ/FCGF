@@ -5,8 +5,13 @@ export MISC_ARGS=$2
 export DATA_ROOT="./outputs"
 export DATASET=${DATASET:-KITTINMPairDataset}
 export TRAINER=${TRAINER:-JointLossTrainer}
+<<<<<<< HEAD
 export MODEL=${MODEL:-JointNet}
 export BACKBONE=${BACKBONE:-ResUNetBN2C}
+=======
+export BACKBONE=${BACKBONE:-ResUNetBN2C}
+export MODEL=${MODEL:-JointNet}
+>>>>>>> 1e0fee05481a549b696c017eb22276151851ac75
 export MODEL_N_OUT=${MODEL_N_OUT:-16}
 export OPTIMIZER=${OPTIMIZER:-SGD}
 export LR=${LR:-1e-1}
