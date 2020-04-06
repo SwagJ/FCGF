@@ -18,7 +18,7 @@ logging_arg = add_argument_group('Logging')
 logging_arg.add_argument('--out_dir', type=str, default='outputs')
 
 trainer_arg = add_argument_group('Trainer')
-trainer_arg.add_argument('--trainer', type=str, default='TripletLossTrainer')
+trainer_arg.add_argument('--trainer', type=str, default='HardestContrastiveLossTrainer')
 trainer_arg.add_argument('--save_freq_epoch', type=int, default=1)
 trainer_arg.add_argument('--batch_size', type=int, default=4)
 trainer_arg.add_argument('--val_batch_size', type=int, default=1)
@@ -63,7 +63,7 @@ trainer_arg.add_argument('--triplet_num_rand', type=int, default=1024)
 
 # dNetwork specific configurations
 net_arg = add_argument_group('Network')
-net_arg.add_argument('--model', type=str, default='JointNet')
+net_arg.add_argument('--model', type=str, default='ResUNetBN2C')
 net_arg.add_argument('--backbone_model', type=str, default=None)
 net_arg.add_argument('--model_n_out', type=int, default=32, help='Feature dimension')
 net_arg.add_argument('--conv1_kernel_size', type=int, default=5)

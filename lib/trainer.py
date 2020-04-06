@@ -753,7 +753,7 @@ class HardestTripletLossTrainer(TripletLossTrainer):
 
     return loss, pos_dist.mean(), (D01min.mean() + D10min.mean()).item() / 2
 
-class JointTripletLossTrainer(ContrastiveLossTrainer):
+class JointLossTrainer(ContrastiveLossTrainer):
 
   def joint_loss(self,
                    F0,
@@ -901,3 +901,75 @@ class JointTripletLossTrainer(ContrastiveLossTrainer):
         neg_dist_meter.reset()
         data_meter.reset()
         total_timer.reset()
+
+  self.model.eval()
+    self.val_data_loader.dataset.reset_seed(0)
+    num_data = 0
+    hit_ratio_meter, feat_match_ratio, loss_meter, rte_meter, rre_meter = AverageMeter(
+    ), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
+    data_timer, feat_timer, matching_timer = Timer(), Timer(), Timer()
+    tot_num_data = len(self.val_data_loader.dataset)
+    if self.val_max_iter > 0:
+      tot_num_data = min(self.val_max_iter, tot_num_data)
+    data_loader_iter = self.val_data_loader.__iter__()
+
+    for batch_idx in range(tot_num_data):
+      data_timer.tic()
+      input_dict = data_loader_iter.next()
+      data_timer.toc()
+      len_batch = input_dict['len_batch']
+      # pairs consist of (xyz1 index, xyz0 index)
+      feat_timer.tic()
+      sinput0 = ME.SparseTensor(
+          input_dict['sinput0_F'], coords=input_dict['sinput0_C']).to(self.device)
+
+      sinput1 = ME.SparseTensor(
+          input_dict['sinput1_F'], coords=input_dict['sinput1_C']).to(self.device)
+      out = self.model(sinput0,sinput1,len_batch)
+      F0 = out['feature0']
+      F1 = out['feature1'] 
+      feat_timer.toc()
+
+      matching_timer.tic()
+      xyz0, xyz1, T_gt = input_dict['pcd0'], input_dict['pcd1'], input_dict['T_gt']
+      xyz0_corr, xyz1_corr = self.find_corr(xyz0, xyz1, F0, F1, subsample_size=5000)
+      T_est = te.est_quad_linear_robust(xyz0_corr, xyz1_corr)
+
+      loss = corr_dist(T_est, T_gt, xyz0, xyz1, weight=None)
+      loss_meter.update(loss)
+
+      rte = np.linalg.norm(T_est[:3, 3] - T_gt[:3, 3])
+      rte_meter.update(rte)
+      rre = np.arccos((np.trace(T_est[:3, :3].t() @ T_gt[:3, :3]) - 1) / 2)
+      if not np.isnan(rre):
+        rre_meter.update(rre)
+
+      hit_ratio = self.evaluate_hit_ratio(
+          xyz0_corr, xyz1_corr, T_gt, thresh=self.config.hit_ratio_thresh)
+      hit_ratio_meter.update(hit_ratio)
+      feat_match_ratio.update(hit_ratio > 0.05)
+      matching_timer.toc()
+
+      num_data += 1
+      torch.cuda.empty_cache()
+
+      if batch_idx % 100 == 0 and batch_idx > 0:
+        logging.info(' '.join([
+            f"Validation iter {num_data} / {tot_num_data} : Data Loading Time: {data_timer.avg:.3f},",
+            f"Feature Extraction Time: {feat_timer.avg:.3f}, Matching Time: {matching_timer.avg:.3f},",
+            f"Loss: {loss_meter.avg:.3f}, RTE: {rte_meter.avg:.3f}, RRE: {rre_meter.avg:.3f},",
+            f"Hit Ratio: {hit_ratio_meter.avg:.3f}, Feat Match Ratio: {feat_match_ratio.avg:.3f}"
+        ]))
+        data_timer.reset()
+
+    logging.info(' '.join([
+        f"Final Loss: {loss_meter.avg:.3f}, RTE: {rte_meter.avg:.3f}, RRE: {rre_meter.avg:.3f},",
+        f"Hit Ratio: {hit_ratio_meter.avg:.3f}, Feat Match Ratio: {feat_match_ratio.avg:.3f}"
+    ]))
+    return {
+        "loss": loss_meter.avg,
+        "rre": rre_meter.avg,
+        "rte": rte_meter.avg,
+        'feat_match_ratio': feat_match_ratio.avg,
+        'hit_ratio': hit_ratio_meter.avg
+    }

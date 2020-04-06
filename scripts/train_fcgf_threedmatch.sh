@@ -3,22 +3,24 @@ export PATH_POSTFIX=$1
 export MISC_ARGS=$2
 
 export DATA_ROOT="./outputs"
-export DATASET=${DATASET:-KITTINMPairDataset}
-export TRAINER=${TRAINER:-HardestContrastiveLossTrainer}
-export MODEL=${MODEL:-ResUNetBN2C}
+export DATASET=${DATASET:-ThreeDMatchPairDataset}
+export TRAINER=${TRAINER:-JointLossTrainer}
+export BACKBONE=${BACKBONE:-ResUNetBN2C}
+export MODEL=${MODEL:-JointNet}
 export MODEL_N_OUT=${MODEL_N_OUT:-16}
 export OPTIMIZER=${OPTIMIZER:-SGD}
 export LR=${LR:-1e-1}
 export MAX_EPOCH=${MAX_EPOCH:-200}
 export BATCH_SIZE=${BATCH_SIZE:-8}
 export ITER_SIZE=${ITER_SIZE:-1}
-export VOXEL_SIZE=${VOXEL_SIZE:-0.3}
+export VOXEL_SIZE=${VOXEL_SIZE:-0.05}
 export POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER=${POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER:-1.5}
 export CONV1_KERNEL_SIZE=${CONV1_KERNEL_SIZE:-5}
 export EXP_GAMMA=${EXP_GAMMA:-0.99}
 export RANDOM_SCALE=${RANDOM_SCALE:-True}
 export TIME=$(date +"%Y-%m-%d_%H-%M-%S")
 export KITTI_PATH=${KITTI_PATH:-/cluster/scratch/majing/kitti/}
+export THREED_PATH=${THREED_PATH:-/cluster/scratch/majing/threedmatch/}
 export VERSION=$(git rev-parse HEAD)
 
 export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/modelnout${MODEL_N_OUT}
@@ -56,6 +58,7 @@ python train.py \
 	--dataset ${DATASET} \
 	--trainer ${TRAINER} \
 	--model ${MODEL} \
+	--backbone_model ${BACKBONE} \
 	--model_n_out ${MODEL_N_OUT} \
 	--conv1_kernel_size ${CONV1_KERNEL_SIZE} \
 	--optimizer ${OPTIMIZER} \
@@ -69,7 +72,7 @@ python train.py \
 	--positive_pair_search_voxel_size_multiplier ${POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER} \
 	--kitti_root ${KITTI_PATH} \
 	--hit_ratio_thresh 0.3 \
-	--icp_cache_path "/disk/kitti/icp" \
+	#--icp_cache_path "/disk/kitti/icp" \
 	#--resume ${OUT_DIR} \
 	$MISC_ARGS 2>&1 | tee -a $LOG
 

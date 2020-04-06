@@ -63,7 +63,7 @@ python train.py \
 	--kaist_root ${KAIST_PATH} \
 	--hit_ratio_thresh 0.3 \
 	--icp_cache_path "/disk/kaist/icp" \
-	--resume ${RESUME} \
+	#--resume ${OUT_DIR} \
 	$MISC_ARGS 2>&1 | tee -a $LOG
 
 # Test
