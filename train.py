@@ -11,7 +11,7 @@ from lib.data_loaders import make_data_loader
 from config import get_config
 
 from lib.trainer import ContrastiveLossTrainer, HardestContrastiveLossTrainer, \
-    TripletLossTrainer, HardestTripletLossTrainer, JointTripletLossTrainer
+    TripletLossTrainer, HardestTripletLossTrainer, JointLossTrainer
 
 ch = logging.StreamHandler(sys.stdout)
 logging.getLogger().setLevel(logging.INFO)
@@ -33,7 +33,7 @@ def get_trainer(trainer):
     return TripletLossTrainer
   elif trainer == 'HardestTripletLossTrainer':
     return HardestTripletLossTrainer
-  elif trainer == 'JointTripletLossTrainer':
+  elif trainer == 'JointLossTrainer':
     return JointTripletLossTrainer
   else:
     raise ValueError(f'Trainer {trainer} not found')
