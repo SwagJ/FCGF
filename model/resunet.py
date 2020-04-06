@@ -283,7 +283,7 @@ class Detection(nn.Module):
 
     coords_A = (coords.view(coords.shape[0], 1, 3).repeat(1, coords.shape[0], 1)).short()
     coords_B = (coords.view(1, coords.shape[0], 3).repeat(coords.shape[0], 1, 1)).short()
-    coords_confusion = (torch.stack((coords_A, coords_B), dim=2)).short
+    coords_confusion = (torch.stack((coords_A, coords_B), dim=2)).short()
     every_dist = (((coords_confusion[:, :, 0, :] - coords_confusion[:, :, 1, :]) ** 2).sum(dim=2) ** 0.5).float16()
 
 

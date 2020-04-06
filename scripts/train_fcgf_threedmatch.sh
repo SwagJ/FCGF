@@ -1,4 +1,5 @@
 #! /bin/bash
+
 export PATH_POSTFIX=$1
 export MISC_ARGS=$2
 
@@ -70,7 +71,7 @@ python train.py \
 	--out_dir ${OUT_DIR} \
 	--use_random_scale ${RANDOM_SCALE} \
 	--positive_pair_search_voxel_size_multiplier ${POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER} \
-	--kitti_root ${KITTI_PATH} \
+	--threed_match_dir ${THREED_PATH} \
 	--hit_ratio_thresh 0.3 \
 	#--icp_cache_path "/disk/kitti/icp" \
 	#--resume ${OUT_DIR} \
