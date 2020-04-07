@@ -22,6 +22,7 @@ from lib.eval import find_nn_gpu
 
 from util.file import ensure_dir
 from util.misc import _hash
+#from GPUtil import showUtilization as gpu_usage
 
 import MinkowskiEngine as ME
 
@@ -38,6 +39,8 @@ class AlignmentTrainer:
 
     # Model initialization
     self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.enabled = True
 
     Model = load_model(config.model)
     if config.backbone_model is not None:
@@ -867,7 +870,7 @@ class JointLossTrainer(ContrastiveLossTrainer):
             num_pos=self.config.num_pos_per_batch * self.config.batch_size,
             num_hn_samples=self.config.num_hn_samples_per_batch * self.config.batch_size,
             )
-        logging.info(f" batch {iter_size} Done")
+        #logging.info(f" batch {iter_size} Done")
         loss /= iter_size
         loss.backward()
         batch_loss += loss.item()

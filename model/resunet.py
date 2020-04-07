@@ -9,6 +9,7 @@ import MinkowskiEngine.MinkowskiFunctional as MEF
 from model.common import get_norm
 
 from model.residual_block import get_block
+#from GPUtil import showUtilization as gpu_usage
 
 
 class ResUNet2(ME.MinkowskiNetwork):
@@ -251,9 +252,10 @@ class ResUNetIN2E(ResUNetBN2E):
 class Detection(nn.Module):
   # To use the model, must call initialize_coords before forward pass.
   # Once data is processed, call clear to reset the model before calling initialize_coords
-  def __init__(self,radius=10,device='cpu'):
+  def __init__(self,radius=10,device='cpu',alpha_en=False):
     super(Detection, self).__init__()
     self.device = device
+    self.alpha_en = alpha_en
     #self.len_batch = len_batch
 
 
@@ -278,30 +280,33 @@ class Detection(nn.Module):
     feature = F.relu(feature)
     max_local = torch.max(feature,dim=1)[0]
     beta = feature/max_local.unsqueeze(1)
-    print(beta.requires_grad)
   
     del max_local
     #logging.info(f"Beta Done")
+    if self.alpha_en == True:
+      coords_A = (coords.view(coords.shape[0], 1, 3).repeat(1, coords.shape[0], 1)).short()
+    
+      coords_B = (coords.view(1, coords.shape[0], 3).repeat(coords.shape[0], 1, 1)).short()
+      coords_confusion = (torch.stack((coords_A, coords_B), dim=2)).short()
+      del coords_A,coords_B
+      every_dist = (((coords_confusion[:, :, 0, :] - coords_confusion[:, :, 1, :]) ** 2).sum(dim=2) ** 0.5)
 
-    coords_A = (coords.view(coords.shape[0], 1, 3).repeat(1, coords.shape[0], 1)).short()
-    coords_B = (coords.view(1, coords.shape[0], 3).repeat(coords.shape[0], 1, 1)).short()
-    coords_confusion = (torch.stack((coords_A, coords_B), dim=2)).short()
-    del coords_A,coords_B
-    every_dist = (((coords_confusion[:, :, 0, :] - coords_confusion[:, :, 1, :]) ** 2).sum(dim=2) ** 0.5)
 
+      neighbors = (torch.topk(every_dist,1,largest=False,dim=1).indices)
+      del every_dist
+      neighbor9_feature = (feature[neighbors,:])[0]
+      del neighbors
+      exp_feature = torch.exp(feature)
+      exp_neighbor = torch.sum(torch.exp(neighbor9_feature),dim=0)
+      alpha = exp_feature/exp_neighbor
+      del exp_feature,exp_neighbor
+      #logging.info(f"Alpha Done")
 
-    neighbors = (torch.topk(every_dist,1,largest=False,dim=1).indices)
-    del every_dist
-    neighbor9_feature = (feature[neighbors,:])[0]
-    del neighbors
-    exp_feature = torch.exp(feature)
-    exp_neighbor = torch.sum(torch.exp(neighbor9_feature),dim=0)
-    alpha = exp_feature/exp_neighbor
-    del exp_feature,exp_neighbor
-    #logging.info(f"Alpha Done")
-
-    gamma = torch.max(alpha*beta,dim=1).values
-    del alpha,beta
+      gamma = torch.max(alpha*beta,dim=1).values
+      del alpha,beta
+    else:
+      #print("Computing with only beta")
+      gamma = torch.max(beta,dim=1).values
     #logging.info(f"Gamma Done, gamma dimension{gamma.shape}")
     score = gamma/torch.norm(gamma)
     del gamma
@@ -319,6 +324,7 @@ class JointNet(nn.Module):
                 normalize_feature=None,
                 conv1_kernel_size=None,
                 backbone_model=ResUNetBN2C,
+                alpha_en = False,
                 D=3):
     super(JointNet, self).__init__()
 
@@ -330,6 +336,7 @@ class JointNet(nn.Module):
     self.conv1_kernel_size = conv1_kernel_size
     self.backbone_model = backbone_model
     self.device = device
+    self.alpha_en = alpha_en
     #self.batch_len = batch_len
     #self.len_batch = len_batch
 
@@ -349,8 +356,8 @@ class JointNet(nn.Module):
                               conv1_kernel_size=conv1_kernel_size,
                               D=3)#.to(device)
 
-    self.detection0 = Detection(device=device)
-    self.detection1 = Detection(device=device)
+    self.detection0 = Detection(device=device,alpha_en=self.alpha_en)
+    self.detection1 = Detection(device=device,alpha_en=self.alpha_en)
 
   def forward(self,x0,x1,len_batch):
     #x0 = x0.to(self.device)
@@ -365,8 +372,9 @@ class JointNet(nn.Module):
     feature0 = sparse0.F
     coord1 = (sparse1.C.short()).to(self.device)
     feature1 = sparse1.F
-    del sparse0,sparse1
-    torch.cuda.empty_cache()
+
+    #print("GPU Usage after faeture Extraction")
+    #gpu_usage()
 
     batch_C1, batch_F1 = [],[]
     batch_C0, batch_F0 = [],[]
@@ -387,6 +395,7 @@ class JointNet(nn.Module):
       del C0,C1,F0,F1
       torch.cuda.empty_cache()
       start_idx = end_idx
+
 
     #logging.info(f"Coord_seperation Done")
     #logging.info(f"After append device:{batch_C0[i].device}")
