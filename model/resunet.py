@@ -278,6 +278,7 @@ class Detection(nn.Module):
     feature = F.relu(feature)
     max_local = torch.max(feature,dim=1)[0]
     beta = feature/max_local.unsqueeze(1)
+    print(beta.requires_grad)
   
     del max_local
     #logging.info(f"Beta Done")
