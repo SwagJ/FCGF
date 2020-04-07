@@ -45,7 +45,6 @@ class AlignmentTrainer:
       model = Model(
         self.device,
         config.batch_size,
-        0.25/config.voxel_size,
         num_feats,
         config.model_n_out,
         bn_momentum=config.bn_momentum,
@@ -765,7 +764,6 @@ class JointLossTrainer(ContrastiveLossTrainer):
                    batch_size,
                    num_pos=1024,
                    num_hn_samples=None,
-                   num_rand_triplet=1024,
                    ):
     """
     Generate negative pairs
@@ -775,6 +773,7 @@ class JointLossTrainer(ContrastiveLossTrainer):
     hash_seed = max(N0, N1)
     sel0 = np.random.choice(N0, min(N0, num_hn_samples), replace=False)
     sel1 = np.random.choice(N1, min(N1, num_hn_samples), replace=False)
+
 
     if N_pos_pairs > num_pos:
       pos_sel = np.random.choice(N_pos_pairs, num_pos, replace=False)
@@ -803,21 +802,22 @@ class JointLossTrainer(ContrastiveLossTrainer):
       positive_pairs = np.array(positive_pairs, dtype=np.int64)
 
     pos_keys = _hash(positive_pairs, hash_seed)
-
     D01ind = sel1[D01ind.cpu().numpy()]
     D10ind = sel0[D10ind.cpu().numpy()]
     neg_keys0 = _hash([pos_ind0.numpy(), D01ind], hash_seed)
     neg_keys1 = _hash([D10ind, pos_ind1.numpy()], hash_seed)
 
-    mask0 = torch.from_numpy(
-        np.logical_not(np.isin(neg_keys0, pos_keys, assume_unique=False)))
-    mask1 = torch.from_numpy(
-        np.logical_not(np.isin(neg_keys1, pos_keys, assume_unique=False)))
+    mask0 = torch.from_numpy(np.isin(neg_keys0, pos_keys, assume_unique=False))
+    mask1 = torch.from_numpy(np.isin(neg_keys1, pos_keys, assume_unique=False))
+
+
+    D01min[mask0] = D01min.mean()
+    D10min[mask1] = D10min.mean()
 
     pos_loss = F.relu((posF0 - posF1).pow(2).sum(1) - self.pos_thresh)
-    neg_loss0 = F.relu(self.neg_thresh - D01min[mask0]).pow(2)
-    neg_loss1 = F.relu(self.neg_thresh - D10min[mask1]).pow(2)
-    loss = F.relu(pos_loss + (neg_loss0 + neg_loss1)) * pos_score_norm
+    neg_loss0 = F.relu(self.neg_thresh - D01min).pow(2)
+    neg_loss1 = F.relu(self.neg_thresh - D10min).pow(2)
+    loss = F.relu(pos_loss + (neg_loss0 + neg_loss1)/2) * pos_score_norm
     return loss.mean(), (neg_loss0.mean() + neg_loss1.mean()) / 2, pos_loss.mean()
 
   def _train_epoch(self, epoch):
@@ -833,7 +833,7 @@ class JointLossTrainer(ContrastiveLossTrainer):
     data_loader_iter = self.data_loader.__iter__()
     iter_size = self.iter_size
     data_meter, data_timer, total_timer = AverageMeter(), Timer(), Timer()
-    pos_dist_meter, neg_dist_meter = AverageMeter(), AverageMeter()
+    pos_dist_meter, neg_dist_meter, mem_meter = AverageMeter(), AverageMeter(), AverageMeter()
     start_iter = (epoch - 1) * (len(data_loader) // iter_size)
     for curr_iter in range(len(data_loader) // iter_size):
       self.optimizer.zero_grad()
@@ -846,12 +846,9 @@ class JointLossTrainer(ContrastiveLossTrainer):
         data_time += data_timer.toc(average=False)
 
         # pairs consist of (xyz1 index, xyz0 index)
-        #logging.info(f"self.device is {self.device}")
         len_batch = input_dict['len_batch']
         sinput0 = ME.SparseTensor(
             input_dict['sinput0_F'], coords=input_dict['sinput0_C']).to(self.device)
-        #logging.info(f"sinput0 device is {sinput0.device}")
-        #logging.info(f"model device is {next(self.model.parameters()).is_cuda}")
 
         sinput1 = ME.SparseTensor(
             input_dict['sinput1_F'], coords=input_dict['sinput1_C']).to(self.device)
@@ -867,11 +864,10 @@ class JointLossTrainer(ContrastiveLossTrainer):
             pos_pairs,
             len_batch = input_dict['len_batch'],
             batch_size = config.batch_size,
-            num_pos=config.triplet_num_pos * config.batch_size,
-            num_hn_samples=config.triplet_num_hn * config.batch_size,
-            num_rand_triplet=config.triplet_num_rand * config.batch_size,
+            num_pos=self.config.num_pos_per_batch * self.config.batch_size,
+            num_hn_samples=self.config.num_hn_samples_per_batch * self.config.batch_size,
             )
-        logging.info(f"This batch Done")
+        logging.info(f" batch {iter_size} Done")
         loss /= iter_size
         loss.backward()
         batch_loss += loss.item()
@@ -907,8 +903,8 @@ class JointLossTrainer(ContrastiveLossTrainer):
     self.model.eval()
     self.val_data_loader.dataset.reset_seed(0)
     num_data = 0
-    hit_ratio_meter, feat_match_ratio, loss_meter, rte_meter, rre_meter = AverageMeter(
-    ), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
+    hit_ratio_meter, feat_match_ratio, loss_meter, rte_meter, rre_meter, mem_meter = AverageMeter(
+    ), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
     data_timer, feat_timer, matching_timer = Timer(), Timer(), Timer()
     tot_num_data = len(self.val_data_loader.dataset)
     if self.val_max_iter > 0:
@@ -954,14 +950,17 @@ class JointLossTrainer(ContrastiveLossTrainer):
       matching_timer.toc()
 
       num_data += 1
+      mem_meter.update(torch.cuda.memory_allocated(self.device))
       torch.cuda.empty_cache()
+      
 
       if batch_idx % 100 == 0 and batch_idx > 0:
         logging.info(' '.join([
             f"Validation iter {num_data} / {tot_num_data} : Data Loading Time: {data_timer.avg:.3f},",
             f"Feature Extraction Time: {feat_timer.avg:.3f}, Matching Time: {matching_timer.avg:.3f},",
             f"Loss: {loss_meter.avg:.3f}, RTE: {rte_meter.avg:.3f}, RRE: {rre_meter.avg:.3f},",
-            f"Hit Ratio: {hit_ratio_meter.avg:.3f}, Feat Match Ratio: {feat_match_ratio.avg:.3f}"
+            f"Hit Ratio: {hit_ratio_meter.avg:.3f}, Feat Match Ratio: {feat_match_ratio.avg:.3f}",
+            f"Average Meter: {mem_meter.avg:.3f}"
         ]))
         data_timer.reset()
 

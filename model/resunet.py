@@ -261,26 +261,26 @@ class Detection(nn.Module):
     #point_len = self.len_batch
     device = self.device
 
-    score = torch.Tensor()
+    score = (torch.Tensor()).to(device)
     for i in range(len_batch):
-      score = torch.cat((score,self._detection_score(coords=coords[i],
-                                         feature=features[i],
-                                         device=device)),0
-                  )
-      print(score.shape)
+      batch_score = self._detection_score(coords[i],features[i])
+      #print(batch_score.device)
+      score = torch.cat((score,batch_score),0)
+      #print(score.shape)
       #score1.append(self._detection_score(coords=batch_C1[i],feature=batch_F1[i],radius=radius))
 
     return score
 
 
-  def _detection_score(self,coords=None,feature=None,device=None):
+  def _detection_score(self,coords=None,feature=None):
     #find all points in a cube whose center is the point
     #get alpha score in feature map k
     feature = F.relu(feature)
     max_local = torch.max(feature,dim=1)[0]
     beta = feature/max_local.unsqueeze(1)
+  
     del max_local
-    logging.info(f"Beta Done")
+    #logging.info(f"Beta Done")
 
     coords_A = (coords.view(coords.shape[0], 1, 3).repeat(1, coords.shape[0], 1)).short()
     coords_B = (coords.view(1, coords.shape[0], 3).repeat(coords.shape[0], 1, 1)).short()
@@ -297,21 +297,21 @@ class Detection(nn.Module):
     exp_neighbor = torch.sum(torch.exp(neighbor9_feature),dim=0)
     alpha = exp_feature/exp_neighbor
     del exp_feature,exp_neighbor
-    logging.info(f"Alpha Done")
+    #logging.info(f"Alpha Done")
 
     gamma = torch.max(alpha*beta,dim=1).values
     del alpha,beta
-    logging.info(f"Gamma Done, gamma dimension{gamma.shape}")
+    #logging.info(f"Gamma Done, gamma dimension{gamma.shape}")
     score = gamma/torch.norm(gamma)
     del gamma
-
+    #print(score.device)
+    torch.cuda.empty_cache()
     return score
 
 class JointNet(nn.Module):
   def __init__(self,
                 device,
                 batch_size=4,
-                radius=10,
                 in_channels=3,
                 out_channels=32,
                 bn_momentum=0.1,
@@ -322,7 +322,6 @@ class JointNet(nn.Module):
     super(JointNet, self).__init__()
 
     self.batch_size = batch_size
-    self.radius = radius
     self.in_channels = in_channels
     self.out_channels = out_channels
     self.bn_momentum = bn_momentum
@@ -356,43 +355,46 @@ class JointNet(nn.Module):
     #x0 = x0.to(self.device)
     #x1 = x1.to(self.device)
     #logging.info(f"input device:{x0.F.device}")
-    print(len_batch)
+    #print(len_batch)
     sparse0 = self.feature_extraction0(x0)
     sparse1 = self.feature_extraction1(x1)
-    logging.info(f"Feature Extraction Done")
+    #logging.info(f"Feature Extraction Done")
     #logging.info(f"coord at output device:{sparse1.coordinates_at(0).device}")
     coord0 = (sparse0.C.short()).to(self.device)
     feature0 = sparse0.F
     coord1 = (sparse1.C.short()).to(self.device)
     feature1 = sparse1.F
-
+    del sparse0,sparse1
+    torch.cuda.empty_cache()
 
     batch_C1, batch_F1 = [],[]
     batch_C0, batch_F0 = [],[]
     start_idx = np.zeros((2,),dtype=int)
     for i in range(len(len_batch)):
       end_idx = start_idx + np.array(len_batch[i],dtype=int)
-      print(start_idx,end_idx)
+      #print(start_idx,end_idx)
       #logging.info(f"Before append device:{sparse0.C.device}")
       C0 = coord0[start_idx[0]:end_idx[0],1:4]
       C1 = coord1[start_idx[1]:end_idx[1],1:4]
       F0 = feature0[start_idx[0]:end_idx[0],:]
       F1 = feature1[start_idx[1]:end_idx[1],:]
-      print(C0.shape,C1.shape,F0.shape,F1.shape)
+      #print(C0.shape,C1.shape,F0.shape,F1.shape)
       batch_C1.append(C1)
       batch_F1.append(F1)
       batch_C0.append(C0)
       batch_F0.append(F0)
+      del C0,C1,F0,F1
+      torch.cuda.empty_cache()
       start_idx = end_idx
 
-    logging.info(f"Coord_seperation Done")
+    #logging.info(f"Coord_seperation Done")
     #logging.info(f"After append device:{batch_C0[i].device}")
     score0 = self.detection0(batch_C0,batch_F0,len(len_batch))
     score1 = self.detection1(batch_C1,batch_F1,len(len_batch))
 
     return{
-     'feature0': sparse0,
-     'feature1': sparse1,
+     'feature0': feature0,
+     'feature1': feature1,
      'score0': score0,
      'score1': score1
     }

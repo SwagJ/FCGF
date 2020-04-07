@@ -1,0 +1,1230 @@
+Sender: LSF System <lsfadmin@lo-dgx1-002>
+Subject: Job 5699180: <./scripts/train_fcgf_threedmatch.sh bash> in cluster <leonhard> Done
+
+Job <./scripts/train_fcgf_threedmatch.sh bash> was submitted from host <lo-login-01> by user <majing> in cluster <leonhard> at Tue Apr  7 01:54:18 2020
+Job was executed on host(s) <4*lo-dgx1-002>, in queue <gpu.4h>, as user <majing> in cluster <leonhard> at Tue Apr  7 01:54:42 2020
+</cluster/home/majing> was used as the home directory.
+</cluster/scratch/majing/FCGF> was used as the working directory.
+Started at Tue Apr  7 01:54:42 2020
+Terminated at Tue Apr  7 01:59:55 2020
+Results reported at Tue Apr  7 01:59:55 2020
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+./scripts/train_fcgf_threedmatch.sh bash
+------------------------------------------------------------
+
+Successfully completed.
+
+Resource usage summary:
+
+    CPU time :                                   454.29 sec.
+    Max Memory :                                 6279 MB
+    Average Memory :                             4114.17 MB
+    Total Requested Memory :                     18000.00 MB
+    Delta Memory :                               11721.00 MB
+    Max Swap :                                   -
+    Max Processes :                              6
+    Max Threads :                                18
+    Run time :                                   337 sec.
+    Turnaround time :                            337 sec.
+
+The output (if any) follows:
+
+./outputs/ThreeDMatchPairDataset-v0.05/JointLossTrainer/JointNet/modelnout32
+Host:  lo-dgx1-002
+which: no conda in (/cluster/apps/lsf/10.1/linux3.10-glibc2.17-x86_64/bin:/cluster/apps/local:/cluster/apps/sfos/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/cluster/home/majing/.local/bin:/cluster/home/majing/bin)
+Conda 
+/cluster/scratch/majing/FCGF
+Version:  9f6026197ef9fb9432ab590ee0e97bd4b0ea8195
+Git diff
+
+diff --git a/lib/trainer.py b/lib/trainer.py
+index 30103e7..beea30e 100644
+--- a/lib/trainer.py
++++ b/lib/trainer.py
+@@ -45,7 +45,6 @@ class AlignmentTrainer:
+       model = Model(
+         self.device,
+         config.batch_size,
+-        0.25/config.voxel_size,
+         num_feats,
+         config.model_n_out,
+         bn_momentum=config.bn_momentum,
+@@ -765,7 +764,6 @@ class JointLossTrainer(ContrastiveLossTrainer):
+                    batch_size,
+                    num_pos=1024,
+                    num_hn_samples=None,
+-                   num_rand_triplet=1024,
+                    ):
+     """
+     Generate negative pairs
+@@ -775,6 +773,8 @@ class JointLossTrainer(ContrastiveLossTrainer):
+     hash_seed = max(N0, N1)
+     sel0 = np.random.choice(N0, min(N0, num_hn_samples), replace=False)
+     sel1 = np.random.choice(N1, min(N1, num_hn_samples), replace=False)
++    logging.info(f"sel0 len: {sel0.shape} sel1 len:{sel1.shape}")
++
+ 
+     if N_pos_pairs > num_pos:
+       pos_sel = np.random.choice(N_pos_pairs, num_pos, replace=False)
+@@ -803,21 +803,27 @@ class JointLossTrainer(ContrastiveLossTrainer):
+       positive_pairs = np.array(positive_pairs, dtype=np.int64)
+ 
+     pos_keys = _hash(positive_pairs, hash_seed)
+-
++    logging.info(f"pos_key len:{pos_keys.shape}")
+     D01ind = sel1[D01ind.cpu().numpy()]
+     D10ind = sel0[D10ind.cpu().numpy()]
++    logging.info(f"D01 {D01min.shape} D10 {D10min.shape}")
+     neg_keys0 = _hash([pos_ind0.numpy(), D01ind], hash_seed)
+     neg_keys1 = _hash([D10ind, pos_ind1.numpy()], hash_seed)
++    logging.info(f"neg_0: {neg_keys0.shape} neg_1: {neg_keys1.shape}")
++
++    mask0 = torch.from_numpy(np.isin(neg_keys0, pos_keys, assume_unique=False))
++    mask1 = torch.from_numpy(np.isin(neg_keys1, pos_keys, assume_unique=False))
++    logging.info(f"mask0 true:{mask0.nonzero()};mask 1 true:{mask1.nonzero()}")
+ 
+-    mask0 = torch.from_numpy(
+-        np.logical_not(np.isin(neg_keys0, pos_keys, assume_unique=False)))
+-    mask1 = torch.from_numpy(
+-        np.logical_not(np.isin(neg_keys1, pos_keys, assume_unique=False)))
++
++    D01min[mask0] = D01min.mean()
++    D10min[mask1] = D10min.mean()
+ 
+     pos_loss = F.relu((posF0 - posF1).pow(2).sum(1) - self.pos_thresh)
+-    neg_loss0 = F.relu(self.neg_thresh - D01min[mask0]).pow(2)
+-    neg_loss1 = F.relu(self.neg_thresh - D10min[mask1]).pow(2)
+-    loss = F.relu(pos_loss + (neg_loss0 + neg_loss1)) * pos_score_norm
++    neg_loss0 = F.relu(self.neg_thresh - D01min).pow(2)
++    neg_loss1 = F.relu(self.neg_thresh - D10min).pow(2)
++    print(pos_loss.shape,neg_loss0.shape,neg_loss1.shape,pos_score_norm.shape)
++    loss = F.relu(pos_loss + (neg_loss0 + neg_loss1)/2) * pos_score_norm
+     return loss.mean(), (neg_loss0.mean() + neg_loss1.mean()) / 2, pos_loss.mean()
+ 
+   def _train_epoch(self, epoch):
+@@ -833,7 +839,7 @@ class JointLossTrainer(ContrastiveLossTrainer):
+     data_loader_iter = self.data_loader.__iter__()
+     iter_size = self.iter_size
+     data_meter, data_timer, total_timer = AverageMeter(), Timer(), Timer()
+-    pos_dist_meter, neg_dist_meter = AverageMeter(), AverageMeter()
++    pos_dist_meter, neg_dist_meter, mem_meter = AverageMeter(), AverageMeter(), AverageMeter()
+     start_iter = (epoch - 1) * (len(data_loader) // iter_size)
+     for curr_iter in range(len(data_loader) // iter_size):
+       self.optimizer.zero_grad()
+@@ -867,11 +873,10 @@ class JointLossTrainer(ContrastiveLossTrainer):
+             pos_pairs,
+             len_batch = input_dict['len_batch'],
+             batch_size = config.batch_size,
+-            num_pos=config.triplet_num_pos * config.batch_size,
+-            num_hn_samples=config.triplet_num_hn * config.batch_size,
+-            num_rand_triplet=config.triplet_num_rand * config.batch_size,
++            num_pos=self.config.num_pos_per_batch * self.config.batch_size,
++            num_hn_samples=self.config.num_hn_samples_per_batch * self.config.batch_size,
+             )
+-        logging.info(f"This batch Done")
++        logging.info(f" batch {iter_size} Done")
+         loss /= iter_size
+         loss.backward()
+         batch_loss += loss.item()
+@@ -907,8 +912,8 @@ class JointLossTrainer(ContrastiveLossTrainer):
+     self.model.eval()
+     self.val_data_loader.dataset.reset_seed(0)
+     num_data = 0
+-    hit_ratio_meter, feat_match_ratio, loss_meter, rte_meter, rre_meter = AverageMeter(
+-    ), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
++    hit_ratio_meter, feat_match_ratio, loss_meter, rte_meter, rre_meter, mem_meter = AverageMeter(
++    ), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
+     data_timer, feat_timer, matching_timer = Timer(), Timer(), Timer()
+     tot_num_data = len(self.val_data_loader.dataset)
+     if self.val_max_iter > 0:
+@@ -954,14 +959,17 @@ class JointLossTrainer(ContrastiveLossTrainer):
+       matching_timer.toc()
+ 
+       num_data += 1
++      mem_meter.update(torch.cuda.memory_allocated(self.device))
+       torch.cuda.empty_cache()
++      
+ 
+       if batch_idx % 100 == 0 and batch_idx > 0:
+         logging.info(' '.join([
+             f"Validation iter {num_data} / {tot_num_data} : Data Loading Time: {data_timer.avg:.3f},",
+             f"Feature Extraction Time: {feat_timer.avg:.3f}, Matching Time: {matching_timer.avg:.3f},",
+             f"Loss: {loss_meter.avg:.3f}, RTE: {rte_meter.avg:.3f}, RRE: {rre_meter.avg:.3f},",
+-            f"Hit Ratio: {hit_ratio_meter.avg:.3f}, Feat Match Ratio: {feat_match_ratio.avg:.3f}"
++            f"Hit Ratio: {hit_ratio_meter.avg:.3f}, Feat Match Ratio: {feat_match_ratio.avg:.3f}",
++            f"Average Meter: {mem_meter.avg:.3f}"
+         ]))
+         data_timer.reset()
+ 
+diff --git a/lsf.o5697077 b/lsf.o5697077
+deleted file mode 100644
+index af010b1..0000000
+--- a/lsf.o5697077
++++ /dev/null
+@@ -1,479 +0,0 @@
+-Sender: LSF System <lsfadmin@lo-g2-020>
+-Subject: Job 5697077: <./scripts/train_fcgf_threedmatch.sh bash> in cluster <leonhard> Done
+-
+-Job <./scripts/train_fcgf_threedmatch.sh bash> was submitted from host <lo-login-01> by user <majing> in cluster <leonhard> at Mon Apr  6 19:54:56 2020
+-Job was executed on host(s) <4*lo-g2-020>, in queue <gpu.4h>, as user <majing> in cluster <leonhard> at Mon Apr  6 19:55:10 2020
+-</cluster/home/majing> was used as the home directory.
+-</cluster/scratch/majing/FCGF> was used as the working directory.
+-Started at Mon Apr  6 19:55:10 2020
+-Terminated at Mon Apr  6 19:56:25 2020
+-Results reported at Mon Apr  6 19:56:25 2020
+-
+-Your job looked like:
+-
+-------------------------------------------------------------
+-# LSBATCH: User input
+-./scripts/train_fcgf_threedmatch.sh bash
+-------------------------------------------------------------
+-
+-Successfully completed.
+-
+-Resource usage summary:
+-
+-    CPU time :                                   48.29 sec.
+-    Max Memory :                                 2723 MB
+-    Average Memory :                             1241.50 MB
+-    Total Requested Memory :                     18000.00 MB
+-    Delta Memory :                               15277.00 MB
+-    Max Swap :                                   -
+-    Max Processes :                              6
+-    Max Threads :                                8
+-    Run time :                                   93 sec.
+-    Turnaround time :                            89 sec.
+-
+-The output (if any) follows:
+-
+-./outputs/ThreeDMatchPairDataset-v0.05/JointLossTrainer/JointNet/modelnout32
+-Host:  lo-g2-020
+-which: no conda in (/cluster/apps/lsf/10.1/linux3.10-glibc2.17-x86_64/bin:/cluster/apps/local:/cluster/apps/sfos/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/cluster/home/majing/.local/bin:/cluster/home/majing/bin)
+-Conda 
+-/cluster/scratch/majing/FCGF
+-Version:  32ee6f4c59d77299814b43947460ed65f87dae09
+-Git diff
+-
+-diff --git a/MinkowskiEngine b/MinkowskiEngine
+-index a0a8ce3..9d8dfae 160000
+---- a/MinkowskiEngine
+-+++ b/MinkowskiEngine
+-@@ -1 +1 @@
+--Subproject commit a0a8ce3ac6aab1e3107a057ff9ec3394087ade6c
+-+Subproject commit 9d8dfae09968f4a154b96ea38adee7ab02a74563
+-diff --git a/model/resunet.py b/model/resunet.py
+-index 251935e..7e9ab9f 100644
+---- a/model/resunet.py
+-+++ b/model/resunet.py
+-@@ -283,7 +283,7 @@ class Detection(nn.Module):
+- 
+-     coords_A = (coords.view(coords.shape[0], 1, 3).repeat(1, coords.shape[0], 1)).short()
+-     coords_B = (coords.view(1, coords.shape[0], 3).repeat(coords.shape[0], 1, 1)).short()
+--    coords_confusion = (torch.stack((coords_A, coords_B), dim=2)).short
+-+    coords_confusion = (torch.stack((coords_A, coords_B), dim=2)).short()
+-     every_dist = (((coords_confusion[:, :, 0, :] - coords_confusion[:, :, 1, :]) ** 2).sum(dim=2) ** 0.5).float16()
+- 
+- 
+-diff --git a/scripts/train_fcgf_threedmatch.sh b/scripts/train_fcgf_threedmatch.sh
+-index 2d93c5b..9b69bd4 100755
+---- a/scripts/train_fcgf_threedmatch.sh
+-+++ b/scripts/train_fcgf_threedmatch.sh
+-@@ -1,4 +1,5 @@
+- #! /bin/bash
+-+
+- export PATH_POSTFIX=$1
+- export MISC_ARGS=$2
+- 
+-@@ -70,7 +71,7 @@ python train.py \
+- 	--out_dir ${OUT_DIR} \
+- 	--use_random_scale ${RANDOM_SCALE} \
+- 	--positive_pair_search_voxel_size_multiplier ${POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER} \
+--	--kitti_root ${KITTI_PATH} \
+-+	--threed_match_dir ${THREED_PATH} \
+- 	--hit_ratio_thresh 0.3 \
+- 	#--icp_cache_path "/disk/kitti/icp" \
+- 	#--resume ${OUT_DIR} \
+-
+-Mon Apr  6 19:55:31 2020       
+-+-----------------------------------------------------------------------------+
+-| NVIDIA-SMI 418.39       Driver Version: 418.39       CUDA Version: 10.1     |
+-|-------------------------------+----------------------+----------------------+
+-| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+-| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+-|===============================+======================+======================|
+-|   0  GeForce RTX 208...  Off  | 00000000:3D:00.0 Off |                  N/A |
+-|  0%   34C    P8     3W / 250W |      0MiB / 10989MiB |      0%   E. Process |
+-+-------------------------------+----------------------+----------------------+
+-                                                                               
+-+-----------------------------------------------------------------------------+
+-| Processes:                                                       GPU Memory |
+-|  GPU       PID   Type   Process name                             Usage      |
+-|=============================================================================|
+-|  No running processes found                                                 |
+-+-----------------------------------------------------------------------------+
+-
+-The following have been reloaded with a version change:
+-  1) gcc/4.8.5 => gcc/6.3.0
+-
+-Requirement already up-to-date: torch in /cluster/home/majing/.local/lib/python3.7/site-packages (1.4.0)
+-Requirement already up-to-date: torchvision in /cluster/home/majing/.local/lib/python3.7/site-packages (0.5.0)
+-Requirement already satisfied, skipping upgrade: six in /cluster/apps/python/3.7.4_gpu_gcc630/x86_64/lib64/python3.7/site-packages (from torchvision) (1.12.0)
+-Requirement already satisfied, skipping upgrade: pillow>=4.1.1 in /cluster/apps/python/3.7.4_gpu_gcc630/x86_64/lib64/python3.7/site-packages (from torchvision) (6.2.0)
+-Requirement already satisfied, skipping upgrade: numpy in /cluster/home/majing/.local/lib/python3.7/site-packages (from torchvision) (1.18.2)
+-Requirement already up-to-date: numpy in /cluster/home/majing/.local/lib/python3.7/site-packages (1.18.2)
+-
+-Using built objects
+-
+-Using BLAS=openblas
+-rm -f -rf build dist
+-running install
+-running bdist_egg
+-running egg_info
+-writing MinkowskiEngine.egg-info/PKG-INFO
+-writing dependency_links to MinkowskiEngine.egg-info/dependency_links.txt
+-writing requirements to MinkowskiEngine.egg-info/requires.txt
+-writing top-level names to MinkowskiEngine.egg-info/top_level.txt
+-reading manifest file 'MinkowskiEngine.egg-info/SOURCES.txt'
+-reading manifest template 'MANIFEST.in'
+-writing manifest file 'MinkowskiEngine.egg-info/SOURCES.txt'
+-installing library code to build/bdist.linux-x86_64/egg
+-running install_lib
+-running build_py
+-creating build
+-creating build/lib.linux-x86_64-3.7
+-creating build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/SparseTensor.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiChannelwiseConvolution.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiPruning.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiCoords.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiNetwork.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiUnion.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiNormalization.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiNonlinearity.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiBroadcast.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiFunctional.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiConvolution.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/Common.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/__init__.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiPooling.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-copying ./MinkowskiEngine/MinkowskiOps.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+-creating build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+-copying ./MinkowskiEngine/utils/coords.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+-copying ./MinkowskiEngine/utils/collation.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+-copying ./MinkowskiEngine/utils/quantization.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+-copying ./MinkowskiEngine/utils/gradcheck.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+-copying ./MinkowskiEngine/utils/init.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+-copying ./MinkowskiEngine/utils/__init__.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+-creating build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+-copying ./MinkowskiEngine/modules/senet_block.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+-copying ./MinkowskiEngine/modules/resnet_block.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+-copying ./MinkowskiEngine/modules/__init__.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+-running build_ext
+-building 'MinkowskiEngineBackend' extension
+-creating build/temp.linux-x86_64-3.7
+-creating build/temp.linux-x86_64-3.7/pybind
+-/cluster/spack/apps/linux-centos7-x86_64/gcc-4.8.5/gcc-6.3.0-d7fey5ouwb3cw26w5zqafqcse7q3fs6d/bin/gcc -Wno-unused-result -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -ftree-vectorize -march=core-avx2 -mavx2 -ftree-vectorize -march=core-avx2 -mavx2 -fPIC -I./ -I/cluster/apps/python/3.7.4_gpu_gcc630/x86_64/include/python3.7m/.. -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include/torch/csrc/api/include -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include/TH -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include/THC -I/cluster/apps/gcc-6.3.0/cuda-10.1.243-n6qg6z5js3zfnhp2cfg5yjccej636czm/include -I/cluster/apps/python/3.7.4_gpu_gcc630/x86_64/include/python3.7m -c pybind/minkowski.cpp -o build/temp.linux-x86_64-3.7/pybind/minkowski.o -Wno-deprecated-declarations -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=MinkowskiEngineBackend -D_GLIBCXX_USE_CXX11_ABI=0 -std=c++11
+-/cluster/spack/apps/linux-centos7-x86_64/gcc-4.8.5/gcc-6.3.0-d7fey5ouwb3cw26w5zqafqcse7q3fs6d/bin/g++ -pthread -shared build/temp.linux-x86_64-3.7/pybind/minkowski.o -Lobjs -L/cluster/apps/gcc-6.3.0/cuda-10.1.243-n6qg6z5js3zfnhp2cfg5yjccej636czm/lib64 -L/cluster/apps/python/3.7.4_gpu_gcc630/x86_64/lib64 -lminkowski -lcusparse -lopenblas -lcudart -lpython3.7m -o build/lib.linux-x86_64-3.7/MinkowskiEngineBackend.cpython-37m-x86_64-linux-gnu.so -Wl,-rpath,/cluster/apps/gcc-6.3.0/openblas-0.2.19-jusdys62qhv52qjbsoewvthriekuaynw/lib
+-creating build/bdist.linux-x86_64
+-creating build/bdist.linux-x86_64/egg
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngineBackend.cpython-37m-x86_64-linux-gnu.so -> build/bdist.linux-x86_64/egg
+-creating build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/SparseTensor.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-creating build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/modules/senet_block.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/modules/resnet_block.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/modules/__init__.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+-creating build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/coords.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/collation.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/quantization.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/gradcheck.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/init.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/__init__.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiChannelwiseConvolution.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiPruning.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiCoords.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiNetwork.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiUnion.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiNormalization.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiNonlinearity.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiBroadcast.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiFunctional.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiConvolution.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/Common.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/__init__.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiPooling.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiOps.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/SparseTensor.py to SparseTensor.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/modules/senet_block.py to senet_block.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/modules/resnet_block.py to resnet_block.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/modules/__init__.py to __init__.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/coords.py to coords.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/collation.py to collation.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/quantization.py to quantization.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/gradcheck.py to gradcheck.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/init.py to init.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/__init__.py to __init__.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiChannelwiseConvolution.py to MinkowskiChannelwiseConvolution.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiPruning.py to MinkowskiPruning.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiCoords.py to MinkowskiCoords.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiNetwork.py to MinkowskiNetwork.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiUnion.py to MinkowskiUnion.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiNormalization.py to MinkowskiNormalization.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiNonlinearity.py to MinkowskiNonlinearity.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiBroadcast.py to MinkowskiBroadcast.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiFunctional.py to MinkowskiFunctional.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiConvolution.py to MinkowskiConvolution.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/Common.py to Common.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/__init__.py to __init__.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiPooling.py to MinkowskiPooling.cpython-37.pyc
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiOps.py to MinkowskiOps.cpython-37.pyc
+-creating stub loader for MinkowskiEngineBackend.cpython-37m-x86_64-linux-gnu.so
+-byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngineBackend.py to MinkowskiEngineBackend.cpython-37.pyc
+-creating build/bdist.linux-x86_64/egg/EGG-INFO
+-copying MinkowskiEngine.egg-info/PKG-INFO -> build/bdist.linux-x86_64/egg/EGG-INFO
+-copying MinkowskiEngine.egg-info/SOURCES.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+-copying MinkowskiEngine.egg-info/dependency_links.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+-copying MinkowskiEngine.egg-info/not-zip-safe -> build/bdist.linux-x86_64/egg/EGG-INFO
+-copying MinkowskiEngine.egg-info/requires.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+-copying MinkowskiEngine.egg-info/top_level.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+-writing build/bdist.linux-x86_64/egg/EGG-INFO/native_libs.txt
+-creating dist
+-creating 'dist/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg' and adding 'build/bdist.linux-x86_64/egg' to it
+-removing 'build/bdist.linux-x86_64/egg' (and everything under it)
+-Processing MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg
+-removing '/cluster/home/majing/.local/lib/python3.7/site-packages/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg' (and everything under it)
+-creating /cluster/home/majing/.local/lib/python3.7/site-packages/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg
+-Extracting MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg to /cluster/home/majing/.local/lib/python3.7/site-packages
+-MinkowskiEngine 0.4.2 is already the active version in easy-install.pth
+-
+-Installed /cluster/home/majing/.local/lib/python3.7/site-packages/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg
+-Processing dependencies for MinkowskiEngine==0.4.2
+-Searching for numpy==1.18.2
+-Best match: numpy 1.18.2
+-Adding numpy 1.18.2 to easy-install.pth file
+-Installing f2py script to /cluster/home/majing/.local/bin
+-Installing f2py3 script to /cluster/home/majing/.local/bin
+-Installing f2py3.7 script to /cluster/home/majing/.local/bin
+-
+-Using /cluster/home/majing/.local/lib/python3.7/site-packages
+-Searching for torch==1.4.0
+-Best match: torch 1.4.0
+-Adding torch 1.4.0 to easy-install.pth file
+-Installing convert-caffe2-to-onnx script to /cluster/home/majing/.local/bin
+-Installing convert-onnx-to-caffe2 script to /cluster/home/majing/.local/bin
+-
+-Using /cluster/home/majing/.local/lib/python3.7/site-packages
+-Finished processing dependencies for MinkowskiEngine==0.4.2
+-04/06 19:56:19 ===> Configurations
+-04/06 19:56:19     out_dir: ./outputs/ThreeDMatchPairDataset-v0.05/JointLossTrainer/JointNet/modelnout32
+-04/06 19:56:19     trainer: JointLossTrainer
+-04/06 19:56:19     save_freq_epoch: 1
+-04/06 19:56:19     batch_size: 8
+-04/06 19:56:19     val_batch_size: 1
+-04/06 19:56:19     use_hard_negative: True
+-04/06 19:56:19     hard_negative_sample_ratio: 0.05
+-04/06 19:56:19     hard_negative_max_num: 3000
+-04/06 19:56:19     num_pos_per_batch: 1024
+-04/06 19:56:19     num_hn_samples_per_batch: 256
+-04/06 19:56:19     neg_thresh: 1.4
+-04/06 19:56:19     pos_thresh: 0.1
+-04/06 19:56:19     neg_weight: 1
+-04/06 19:56:19     use_random_scale: True
+-04/06 19:56:19     min_scale: 0.8
+-04/06 19:56:19     max_scale: 1.2
+-04/06 19:56:19     use_random_rotation: True
+-04/06 19:56:19     rotation_range: 360
+-04/06 19:56:19     train_phase: train
+-04/06 19:56:19     val_phase: val
+-04/06 19:56:19     test_phase: test
+-04/06 19:56:19     stat_freq: 40
+-04/06 19:56:19     test_valid: True
+-04/06 19:56:19     val_max_iter: 400
+-04/06 19:56:19     val_epoch_freq: 1
+-04/06 19:56:19     positive_pair_search_voxel_size_multiplier: 1.5
+-04/06 19:56:19     hit_ratio_thresh: 0.3
+-04/06 19:56:19     triplet_num_pos: 256
+-04/06 19:56:19     triplet_num_hn: 512
+-04/06 19:56:19     triplet_num_rand: 1024
+-04/06 19:56:19     model: JointNet
+-04/06 19:56:19     backbone_model: ResUNetBN2C
+-04/06 19:56:19     model_n_out: 32
+-04/06 19:56:19     conv1_kernel_size: 5
+-04/06 19:56:19     normalize_feature: True
+-04/06 19:56:19     dist_type: L2
+-04/06 19:56:19     best_val_metric: feat_match_ratio
+-04/06 19:56:19     optimizer: SGD
+-04/06 19:56:19     max_epoch: 200
+-04/06 19:56:19     lr: 0.1
+-04/06 19:56:19     momentum: 0.8
+-04/06 19:56:19     sgd_momentum: 0.9
+-04/06 19:56:19     sgd_dampening: 0.1
+-04/06 19:56:19     adam_beta1: 0.9
+-04/06 19:56:19     adam_beta2: 0.999
+-04/06 19:56:19     weight_decay: 0.0001
+-04/06 19:56:19     iter_size: 1
+-04/06 19:56:19     bn_momentum: 0.05
+-04/06 19:56:19     exp_gamma: 0.99
+-04/06 19:56:19     scheduler: ExpLR
+-04/06 19:56:19     icp_cache_path: /disk/kitti/
+-04/06 19:56:19     use_gpu: True
+-04/06 19:56:19     weights: None
+-04/06 19:56:19     weights_dir: None
+-04/06 19:56:19     resume: None
+-04/06 19:56:19     resume_dir: None
+-04/06 19:56:19     train_num_thread: 2
+-04/06 19:56:19     val_num_thread: 1
+-04/06 19:56:19     test_num_thread: 2
+-04/06 19:56:19     fast_validation: False
+-04/06 19:56:19     nn_max_n: 500
+-04/06 19:56:19     dataset: ThreeDMatchPairDataset
+-04/06 19:56:19     voxel_size: 0.05
+-04/06 19:56:19     threed_match_dir: /cluster/scratch/majing/threedmatch/
+-04/06 19:56:19     kitti_root: /disk/kitti/
+-04/06 19:56:19     kaist_root: /disk_ssd/kaist/
+-04/06 19:56:19     kitti_max_time_diff: 3
+-04/06 19:56:19     kaist_max_time_diff: 3
+-04/06 19:56:19     kitti_date: 2011_09_26
+-04/06 19:56:19     kaist_date: 2020_03_10
+-04/06 19:56:19 Loading the subset train from /cluster/scratch/majing/threedmatch/
+-04/06 19:56:19 Loading the subset val from /cluster/scratch/majing/threedmatch/
+-04/06 19:56:23 JointNet(
+-  (feature_extraction0): ResUNetBN2C(
+-    (conv1): MinkowskiConvolution(in=1, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[5, 5, 5], stride=[1, 1, 1], dilation=[1, 1, 1])
+-    (norm1): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block1): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=32, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=32, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv2): MinkowskiConvolution(in=32, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block2): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv3): MinkowskiConvolution(in=64, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm3): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block3): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv4): MinkowskiConvolution(in=128, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm4): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block4): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=256, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=256, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv4_tr): MinkowskiConvolutionTranspose(in=256, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm4_tr): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block4_tr): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv3_tr): MinkowskiConvolutionTranspose(in=256, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm3_tr): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block3_tr): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv2_tr): MinkowskiConvolutionTranspose(in=128, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm2_tr): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block2_tr): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv1_tr): MinkowskiConvolution(in=96, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[1, 1, 1], stride=[1, 1, 1], dilation=[1, 1, 1])
+-    (final): MinkowskiConvolution(in=64, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[1, 1, 1], stride=[1, 1, 1], dilation=[1, 1, 1])
+-  )
+-  (feature_extraction1): ResUNetBN2C(
+-    (conv1): MinkowskiConvolution(in=1, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[5, 5, 5], stride=[1, 1, 1], dilation=[1, 1, 1])
+-    (norm1): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block1): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=32, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=32, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv2): MinkowskiConvolution(in=32, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block2): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv3): MinkowskiConvolution(in=64, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm3): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block3): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv4): MinkowskiConvolution(in=128, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm4): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block4): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=256, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=256, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv4_tr): MinkowskiConvolutionTranspose(in=256, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm4_tr): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block4_tr): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv3_tr): MinkowskiConvolutionTranspose(in=256, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm3_tr): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block3_tr): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv2_tr): MinkowskiConvolutionTranspose(in=128, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+-    (norm2_tr): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    (block2_tr): BasicBlockBN(
+-      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+-      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+-    )
+-    (conv1_tr): MinkowskiConvolution(in=96, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[1, 1, 1], stride=[1, 1, 1], dilation=[1, 1, 1])
+-    (final): MinkowskiConvolution(in=64, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[1, 1, 1], stride=[1, 1, 1], dilation=[1, 1, 1])
+-  )
+-  (detection0): Detection()
+-  (detection1): Detection()
+-)
+-{'out_dir': './outputs/ThreeDMatchPairDataset-v0.05/JointLossTrainer/JointNet/modelnout32', 'trainer': 'JointLossTrainer', 'save_freq_epoch': 1, 'batch_size': 8, 'val_batch_size': 1, 'use_hard_negative': True, 'hard_negative_sample_ratio': 0.05, 'hard_negative_max_num': 3000, 'num_pos_per_batch': 1024, 'num_hn_samples_per_batch': 256, 'neg_thresh': 1.4, 'pos_thresh': 0.1, 'neg_weight': 1, 'use_random_scale': True, 'min_scale': 0.8, 'max_scale': 1.2, 'use_random_rotation': True, 'rotation_range': 360, 'train_phase': 'train', 'val_phase': 'val', 'test_phase': 'test', 'stat_freq': 40, 'test_valid': True, 'val_max_iter': 400, 'val_epoch_freq': 1, 'positive_pair_search_voxel_size_multiplier': 1.5, 'hit_ratio_thresh': 0.3, 'triplet_num_pos': 256, 'triplet_num_hn': 512, 'triplet_num_rand': 1024, 'model': 'JointNet', 'backbone_model': 'ResUNetBN2C', 'model_n_out': 32, 'conv1_kernel_size': 5, 'normalize_feature': True, 'dist_type': 'L2', 'best_val_metric': 'feat_match_ratio', 'optimizer': 'SGD', 'max_epoch': 200, 'lr': 0.1, 'momentum': 0.8, 'sgd_momentum': 0.9, 'sgd_dampening': 0.1, 'adam_beta1': 0.9, 'adam_beta2': 0.999, 'weight_decay': 0.0001, 'iter_size': 1, 'bn_momentum': 0.05, 'exp_gamma': 0.99, 'scheduler': 'ExpLR', 'icp_cache_path': '/disk/kitti/', 'use_gpu': True, 'weights': None, 'weights_dir': None, 'resume': None, 'resume_dir': None, 'train_num_thread': 2, 'val_num_thread': 1, 'test_num_thread': 2, 'fast_validation': False, 'nn_max_n': 500, 'dataset': 'ThreeDMatchPairDataset', 'voxel_size': 0.05, 'threed_match_dir': '/cluster/scratch/majing/threedmatch/', 'kitti_root': '/disk/kitti/', 'kaist_root': '/disk_ssd/kaist/', 'kitti_max_time_diff': 3, 'kaist_max_time_diff': 3, 'kitti_date': '2011_09_26', 'kaist_date': '2020_03_10'}
+-04/06 19:56:23 Resetting the data loader seed to 0
+-[[6676, 8435]]
+-04/06 19:56:24 Feature Extraction Done
+-[0 0] [6676 8435]
+-torch.Size([6676, 3]) torch.Size([8435, 3]) torch.Size([6676, 32]) torch.Size([8435, 32])
+-04/06 19:56:24 Coord_seperation Done
+-04/06 19:56:24 Beta Done
+-Traceback (most recent call last):
+-  File "train.py", line 86, in <module>
+-    main(config)
+-  File "train.py", line 65, in main
+-    trainer.train()
+-  File "/cluster/scratch/majing/FCGF/lib/trainer.py", line 144, in train
+-    val_dict = self._valid_epoch()
+-  File "/cluster/scratch/majing/FCGF/lib/trainer.py", line 931, in _valid_epoch
+-    out = self.model(sinput0,sinput1,len_batch)
+-  File "/cluster/home/majing/.local/lib/python3.7/site-packages/torch/nn/modules/module.py", line 532, in __call__
+-    result = self.forward(*input, **kwargs)
+-  File "/cluster/scratch/majing/FCGF/model/resunet.py", line 383, in forward
+-    score0 = self.detection0(batch_C0,batch_F0,len(len_batch))
+-  File "/cluster/home/majing/.local/lib/python3.7/site-packages/torch/nn/modules/module.py", line 532, in __call__
+-    result = self.forward(*input, **kwargs)
+-  File "/cluster/scratch/majing/FCGF/model/resunet.py", line 268, in forward
+-    device=device)),0
+-  File "/cluster/scratch/majing/FCGF/model/resunet.py", line 287, in _detection_score
+-    every_dist = (((coords_confusion[:, :, 0, :] - coords_confusion[:, :, 1, :]) ** 2).sum(dim=2) ** 0.5).float16()
+-AttributeError: 'Tensor' object has no attribute 'float16'
+diff --git a/model/resunet.py b/model/resunet.py
+index 91fef15..fc4ca84 100644
+--- a/model/resunet.py
++++ b/model/resunet.py
+@@ -261,26 +261,26 @@ class Detection(nn.Module):
+     #point_len = self.len_batch
+     device = self.device
+ 
+-    score = torch.Tensor()
++    score = (torch.Tensor()).to(device)
+     for i in range(len_batch):
+-      score = torch.cat((score,self._detection_score(coords=coords[i],
+-                                         feature=features[i],
+-                                         device=device)),0
+-                  )
+-      print(score.shape)
++      batch_score = self._detection_score(coords[i],features[i])
++      #print(batch_score.device)
++      score = torch.cat((score,batch_score),0)
++      #print(score.shape)
+       #score1.append(self._detection_score(coords=batch_C1[i],feature=batch_F1[i],radius=radius))
+ 
+     return score
+ 
+ 
+-  def _detection_score(self,coords=None,feature=None,device=None):
++  def _detection_score(self,coords=None,feature=None):
+     #find all points in a cube whose center is the point
+     #get alpha score in feature map k
+     feature = F.relu(feature)
+     max_local = torch.max(feature,dim=1)[0]
+     beta = feature/max_local.unsqueeze(1)
++  
+     del max_local
+-    logging.info(f"Beta Done")
++    #logging.info(f"Beta Done")
+ 
+     coords_A = (coords.view(coords.shape[0], 1, 3).repeat(1, coords.shape[0], 1)).short()
+     coords_B = (coords.view(1, coords.shape[0], 3).repeat(coords.shape[0], 1, 1)).short()
+@@ -297,21 +297,21 @@ class Detection(nn.Module):
+     exp_neighbor = torch.sum(torch.exp(neighbor9_feature),dim=0)
+     alpha = exp_feature/exp_neighbor
+     del exp_feature,exp_neighbor
+-    logging.info(f"Alpha Done")
++    #logging.info(f"Alpha Done")
+ 
+     gamma = torch.max(alpha*beta,dim=1).values
+     del alpha,beta
+-    logging.info(f"Gamma Done, gamma dimension{gamma.shape}")
++    #logging.info(f"Gamma Done, gamma dimension{gamma.shape}")
+     score = gamma/torch.norm(gamma)
+     del gamma
+-
++    #print(score.device)
++    torch.cuda.empty_cache()
+     return score
+ 
+ class JointNet(nn.Module):
+   def __init__(self,
+                 device,
+                 batch_size=4,
+-                radius=10,
+                 in_channels=3,
+                 out_channels=32,
+                 bn_momentum=0.1,
+@@ -322,7 +322,6 @@ class JointNet(nn.Module):
+     super(JointNet, self).__init__()
+ 
+     self.batch_size = batch_size
+-    self.radius = radius
+     self.in_channels = in_channels
+     self.out_channels = out_channels
+     self.bn_momentum = bn_momentum
+@@ -356,43 +355,46 @@ class JointNet(nn.Module):
+     #x0 = x0.to(self.device)
+     #x1 = x1.to(self.device)
+     #logging.info(f"input device:{x0.F.device}")
+-    print(len_batch)
++    #print(len_batch)
+     sparse0 = self.feature_extraction0(x0)
+     sparse1 = self.feature_extraction1(x1)
+-    logging.info(f"Feature Extraction Done")
++    #logging.info(f"Feature Extraction Done")
+     #logging.info(f"coord at output device:{sparse1.coordinates_at(0).device}")
+     coord0 = (sparse0.C.short()).to(self.device)
+     feature0 = sparse0.F
+     coord1 = (sparse1.C.short()).to(self.device)
+     feature1 = sparse1.F
+-
++    del sparse0,sparse1
++    torch.cuda.empty_cache()
+ 
+     batch_C1, batch_F1 = [],[]
+     batch_C0, batch_F0 = [],[]
+     start_idx = np.zeros((2,),dtype=int)
+     for i in range(len(len_batch)):
+       end_idx = start_idx + np.array(len_batch[i],dtype=int)
+-      print(start_idx,end_idx)
++      #print(start_idx,end_idx)
+       #logging.info(f"Before append device:{sparse0.C.device}")
+       C0 = coord0[start_idx[0]:end_idx[0],1:4]
+       C1 = coord1[start_idx[1]:end_idx[1],1:4]
+       F0 = feature0[start_idx[0]:end_idx[0],:]
+       F1 = feature1[start_idx[1]:end_idx[1],:]
+-      print(C0.shape,C1.shape,F0.shape,F1.shape)
++      #print(C0.shape,C1.shape,F0.shape,F1.shape)
+       batch_C1.append(C1)
+       batch_F1.append(F1)
+       batch_C0.append(C0)
+       batch_F0.append(F0)
++      del C0,C1,F0,F1
++      torch.cuda.empty_cache()
+       start_idx = end_idx
+ 
+-    logging.info(f"Coord_seperation Done")
++    #logging.info(f"Coord_seperation Done")
+     #logging.info(f"After append device:{batch_C0[i].device}")
+     score0 = self.detection0(batch_C0,batch_F0,len(len_batch))
+     score1 = self.detection1(batch_C1,batch_F1,len(len_batch))
+ 
+     return{
+-     'feature0': sparse0,
+-     'feature1': sparse1,
++     'feature0': feature0,
++     'feature1': feature1,
+      'score0': score0,
+      'score1': score1
+     }
+
+Tue Apr  7 01:54:45 2020       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 418.39       Driver Version: 418.39       CUDA Version: 10.1     |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Tesla V100-SXM2...  Off  | 00000000:86:00.0 Off |                    0 |
+| N/A   40C    P0    43W / 300W |      0MiB / 32480MiB |      0%   E. Process |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID   Type   Process name                             Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+
+The following have been reloaded with a version change:
+  1) gcc/4.8.5 => gcc/6.3.0
+
+Requirement already up-to-date: torch in /cluster/home/majing/.local/lib/python3.7/site-packages (1.4.0)
+Requirement already up-to-date: torchvision in /cluster/home/majing/.local/lib/python3.7/site-packages (0.5.0)
+Requirement already satisfied, skipping upgrade: pillow>=4.1.1 in /cluster/apps/python/3.7.4_gpu_gcc630/x86_64/lib64/python3.7/site-packages (from torchvision) (6.2.0)
+Requirement already satisfied, skipping upgrade: numpy in /cluster/home/majing/.local/lib/python3.7/site-packages (from torchvision) (1.18.2)
+Requirement already satisfied, skipping upgrade: six in /cluster/apps/python/3.7.4_gpu_gcc630/x86_64/lib64/python3.7/site-packages (from torchvision) (1.12.0)
+Requirement already up-to-date: numpy in /cluster/home/majing/.local/lib/python3.7/site-packages (1.18.2)
+
+Using built objects
+
+Using BLAS=openblas
+rm -f -rf build dist
+running install
+running bdist_egg
+running egg_info
+writing MinkowskiEngine.egg-info/PKG-INFO
+writing dependency_links to MinkowskiEngine.egg-info/dependency_links.txt
+writing requirements to MinkowskiEngine.egg-info/requires.txt
+writing top-level names to MinkowskiEngine.egg-info/top_level.txt
+reading manifest file 'MinkowskiEngine.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+writing manifest file 'MinkowskiEngine.egg-info/SOURCES.txt'
+installing library code to build/bdist.linux-x86_64/egg
+running install_lib
+running build_py
+creating build
+creating build/lib.linux-x86_64-3.7
+creating build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/SparseTensor.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiChannelwiseConvolution.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiPruning.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiCoords.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiNetwork.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiUnion.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiNormalization.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiNonlinearity.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiBroadcast.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiFunctional.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiConvolution.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/Common.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/__init__.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiPooling.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiOps.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+creating build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/coords.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/collation.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/quantization.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/gradcheck.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/init.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/__init__.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+creating build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+copying ./MinkowskiEngine/modules/senet_block.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+copying ./MinkowskiEngine/modules/resnet_block.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+copying ./MinkowskiEngine/modules/__init__.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+running build_ext
+building 'MinkowskiEngineBackend' extension
+creating build/temp.linux-x86_64-3.7
+creating build/temp.linux-x86_64-3.7/pybind
+/cluster/spack/apps/linux-centos7-x86_64/gcc-4.8.5/gcc-6.3.0-d7fey5ouwb3cw26w5zqafqcse7q3fs6d/bin/gcc -Wno-unused-result -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -ftree-vectorize -march=core-avx2 -mavx2 -ftree-vectorize -march=core-avx2 -mavx2 -fPIC -I./ -I/cluster/apps/python/3.7.4_gpu_gcc630/x86_64/include/python3.7m/.. -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include/torch/csrc/api/include -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include/TH -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include/THC -I/cluster/apps/gcc-6.3.0/cuda-10.1.243-n6qg6z5js3zfnhp2cfg5yjccej636czm/include -I/cluster/apps/python/3.7.4_gpu_gcc630/x86_64/include/python3.7m -c pybind/minkowski.cpp -o build/temp.linux-x86_64-3.7/pybind/minkowski.o -Wno-deprecated-declarations -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=MinkowskiEngineBackend -D_GLIBCXX_USE_CXX11_ABI=0 -std=c++11
+/cluster/spack/apps/linux-centos7-x86_64/gcc-4.8.5/gcc-6.3.0-d7fey5ouwb3cw26w5zqafqcse7q3fs6d/bin/g++ -pthread -shared build/temp.linux-x86_64-3.7/pybind/minkowski.o -Lobjs -L/cluster/apps/gcc-6.3.0/cuda-10.1.243-n6qg6z5js3zfnhp2cfg5yjccej636czm/lib64 -L/cluster/apps/python/3.7.4_gpu_gcc630/x86_64/lib64 -lminkowski -lcusparse -lopenblas -lcudart -lpython3.7m -o build/lib.linux-x86_64-3.7/MinkowskiEngineBackend.cpython-37m-x86_64-linux-gnu.so -Wl,-rpath,/cluster/apps/gcc-6.3.0/openblas-0.2.19-jusdys62qhv52qjbsoewvthriekuaynw/lib
+creating build/bdist.linux-x86_64
+creating build/bdist.linux-x86_64/egg
+copying build/lib.linux-x86_64-3.7/MinkowskiEngineBackend.cpython-37m-x86_64-linux-gnu.so -> build/bdist.linux-x86_64/egg
+creating build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/SparseTensor.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+creating build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/modules/senet_block.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/modules/resnet_block.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/modules/__init__.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+creating build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/coords.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/collation.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/quantization.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/gradcheck.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/init.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/__init__.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiChannelwiseConvolution.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiPruning.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiCoords.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiNetwork.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiUnion.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiNormalization.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiNonlinearity.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiBroadcast.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiFunctional.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiConvolution.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/Common.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/__init__.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiPooling.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiOps.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/SparseTensor.py to SparseTensor.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/modules/senet_block.py to senet_block.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/modules/resnet_block.py to resnet_block.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/modules/__init__.py to __init__.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/coords.py to coords.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/collation.py to collation.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/quantization.py to quantization.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/gradcheck.py to gradcheck.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/init.py to init.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/__init__.py to __init__.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiChannelwiseConvolution.py to MinkowskiChannelwiseConvolution.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiPruning.py to MinkowskiPruning.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiCoords.py to MinkowskiCoords.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiNetwork.py to MinkowskiNetwork.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiUnion.py to MinkowskiUnion.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiNormalization.py to MinkowskiNormalization.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiNonlinearity.py to MinkowskiNonlinearity.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiBroadcast.py to MinkowskiBroadcast.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiFunctional.py to MinkowskiFunctional.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiConvolution.py to MinkowskiConvolution.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/Common.py to Common.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/__init__.py to __init__.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiPooling.py to MinkowskiPooling.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiOps.py to MinkowskiOps.cpython-37.pyc
+creating stub loader for MinkowskiEngineBackend.cpython-37m-x86_64-linux-gnu.so
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngineBackend.py to MinkowskiEngineBackend.cpython-37.pyc
+creating build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/PKG-INFO -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/SOURCES.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/dependency_links.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/not-zip-safe -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/requires.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/top_level.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+writing build/bdist.linux-x86_64/egg/EGG-INFO/native_libs.txt
+creating dist
+creating 'dist/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg' and adding 'build/bdist.linux-x86_64/egg' to it
+removing 'build/bdist.linux-x86_64/egg' (and everything under it)
+Processing MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg
+removing '/cluster/home/majing/.local/lib/python3.7/site-packages/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg' (and everything under it)
+creating /cluster/home/majing/.local/lib/python3.7/site-packages/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg
+Extracting MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg to /cluster/home/majing/.local/lib/python3.7/site-packages
+MinkowskiEngine 0.4.2 is already the active version in easy-install.pth
+
+Installed /cluster/home/majing/.local/lib/python3.7/site-packages/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg
+Processing dependencies for MinkowskiEngine==0.4.2
+Searching for numpy==1.18.2
+Best match: numpy 1.18.2
+Adding numpy 1.18.2 to easy-install.pth file
+Installing f2py script to /cluster/home/majing/.local/bin
+Installing f2py3 script to /cluster/home/majing/.local/bin
+Installing f2py3.7 script to /cluster/home/majing/.local/bin
+
+Using /cluster/home/majing/.local/lib/python3.7/site-packages
+Searching for torch==1.4.0
+Best match: torch 1.4.0
+Adding torch 1.4.0 to easy-install.pth file
+Installing convert-caffe2-to-onnx script to /cluster/home/majing/.local/bin
+Installing convert-onnx-to-caffe2 script to /cluster/home/majing/.local/bin
+
+Using /cluster/home/majing/.local/lib/python3.7/site-packages
+Finished processing dependencies for MinkowskiEngine==0.4.2
+04/07 01:55:49 ===> Configurations
+04/07 01:55:49     out_dir: ./outputs/ThreeDMatchPairDataset-v0.05/JointLossTrainer/JointNet/modelnout32
+04/07 01:55:49     trainer: JointLossTrainer
+04/07 01:55:49     save_freq_epoch: 1
+04/07 01:55:49     batch_size: 8
+04/07 01:55:49     val_batch_size: 1
+04/07 01:55:49     use_hard_negative: True
+04/07 01:55:49     hard_negative_sample_ratio: 0.05
+04/07 01:55:49     hard_negative_max_num: 3000
+04/07 01:55:49     num_pos_per_batch: 1024
+04/07 01:55:49     num_hn_samples_per_batch: 256
+04/07 01:55:49     neg_thresh: 1.4
+04/07 01:55:49     pos_thresh: 0.1
+04/07 01:55:49     neg_weight: 1
+04/07 01:55:49     use_random_scale: True
+04/07 01:55:49     min_scale: 0.8
+04/07 01:55:49     max_scale: 1.2
+04/07 01:55:49     use_random_rotation: True
+04/07 01:55:49     rotation_range: 360
+04/07 01:55:49     train_phase: train
+04/07 01:55:49     val_phase: val
+04/07 01:55:49     test_phase: test
+04/07 01:55:49     stat_freq: 40
+04/07 01:55:49     test_valid: True
+04/07 01:55:49     val_max_iter: 400
+04/07 01:55:49     val_epoch_freq: 1
+04/07 01:55:49     positive_pair_search_voxel_size_multiplier: 1.5
+04/07 01:55:49     hit_ratio_thresh: 0.3
+04/07 01:55:49     triplet_num_pos: 256
+04/07 01:55:49     triplet_num_hn: 512
+04/07 01:55:49     triplet_num_rand: 1024
+04/07 01:55:49     model: JointNet
+04/07 01:55:49     backbone_model: ResUNetBN2C
+04/07 01:55:49     model_n_out: 32
+04/07 01:55:49     conv1_kernel_size: 5
+04/07 01:55:49     normalize_feature: True
+04/07 01:55:49     dist_type: L2
+04/07 01:55:49     best_val_metric: feat_match_ratio
+04/07 01:55:49     optimizer: SGD
+04/07 01:55:49     max_epoch: 200
+04/07 01:55:49     lr: 0.1
+04/07 01:55:49     momentum: 0.8
+04/07 01:55:49     sgd_momentum: 0.9
+04/07 01:55:49     sgd_dampening: 0.1
+04/07 01:55:49     adam_beta1: 0.9
+04/07 01:55:49     adam_beta2: 0.999
+04/07 01:55:49     weight_decay: 0.0001
+04/07 01:55:49     iter_size: 1
+04/07 01:55:49     bn_momentum: 0.05
+04/07 01:55:49     exp_gamma: 0.99
+04/07 01:55:49     scheduler: ExpLR
+04/07 01:55:49     icp_cache_path: /disk/kitti/
+04/07 01:55:49     use_gpu: True
+04/07 01:55:49     weights: None
+04/07 01:55:49     weights_dir: None
+04/07 01:55:49     resume: None
+04/07 01:55:49     resume_dir: None
+04/07 01:55:49     train_num_thread: 2
+04/07 01:55:49     val_num_thread: 1
+04/07 01:55:49     test_num_thread: 2
+04/07 01:55:49     fast_validation: False
+04/07 01:55:49     nn_max_n: 500
+04/07 01:55:49     dataset: ThreeDMatchPairDataset
+04/07 01:55:49     voxel_size: 0.05
+04/07 01:55:49     threed_match_dir: /cluster/scratch/majing/threedmatch/
+04/07 01:55:49     kitti_root: /disk/kitti/
+04/07 01:55:49     kaist_root: /disk_ssd/kaist/
+04/07 01:55:49     kitti_max_time_diff: 3
+04/07 01:55:49     kaist_max_time_diff: 3
+04/07 01:55:49     kitti_date: 2011_09_26
+04/07 01:55:49     kaist_date: 2020_03_10
+04/07 01:55:49 Loading the subset train from /cluster/scratch/majing/threedmatch/
+04/07 01:55:51 Loading the subset val from /cluster/scratch/majing/threedmatch/
+04/07 01:55:57 JointNet(
+  (feature_extraction0): ResUNetBN2C(
+    (conv1): MinkowskiConvolution(in=1, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[5, 5, 5], stride=[1, 1, 1], dilation=[1, 1, 1])
+    (norm1): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block1): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=32, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=32, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv2): MinkowskiConvolution(in=32, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block2): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv3): MinkowskiConvolution(in=64, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm3): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block3): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv4): MinkowskiConvolution(in=128, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm4): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block4): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=256, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=256, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv4_tr): MinkowskiConvolutionTranspose(in=256, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm4_tr): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block4_tr): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv3_tr): MinkowskiConvolutionTranspose(in=256, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm3_tr): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block3_tr): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv2_tr): MinkowskiConvolutionTranspose(in=128, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm2_tr): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block2_tr): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv1_tr): MinkowskiConvolution(in=96, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[1, 1, 1], stride=[1, 1, 1], dilation=[1, 1, 1])
+    (final): MinkowskiConvolution(in=64, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[1, 1, 1], stride=[1, 1, 1], dilation=[1, 1, 1])
+  )
+  (feature_extraction1): ResUNetBN2C(
+    (conv1): MinkowskiConvolution(in=1, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[5, 5, 5], stride=[1, 1, 1], dilation=[1, 1, 1])
+    (norm1): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block1): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=32, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=32, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(32, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv2): MinkowskiConvolution(in=32, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block2): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv3): MinkowskiConvolution(in=64, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm3): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block3): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv4): MinkowskiConvolution(in=128, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm4): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block4): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=256, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=256, out=256, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(256, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv4_tr): MinkowskiConvolutionTranspose(in=256, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm4_tr): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block4_tr): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=128, out=128, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(128, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv3_tr): MinkowskiConvolutionTranspose(in=256, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm3_tr): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block3_tr): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv2_tr): MinkowskiConvolutionTranspose(in=128, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[2, 2, 2], dilation=[1, 1, 1])
+    (norm2_tr): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    (block2_tr): BasicBlockBN(
+      (conv1): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm1): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+      (conv2): MinkowskiConvolution(in=64, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[3, 3, 3], stride=[1, 1, 1], dilation=[1, 1, 1])
+      (norm2): MinkowskiBatchNorm(64, eps=1e-05, momentum=0.05, affine=True, track_running_stats=True)
+    )
+    (conv1_tr): MinkowskiConvolution(in=96, out=64, region_type=RegionType.HYPERCUBE, kernel_size=[1, 1, 1], stride=[1, 1, 1], dilation=[1, 1, 1])
+    (final): MinkowskiConvolution(in=64, out=32, region_type=RegionType.HYPERCUBE, kernel_size=[1, 1, 1], stride=[1, 1, 1], dilation=[1, 1, 1])
+  )
+  (detection0): Detection()
+  (detection1): Detection()
+)
+{'out_dir': './outputs/ThreeDMatchPairDataset-v0.05/JointLossTrainer/JointNet/modelnout32', 'trainer': 'JointLossTrainer', 'save_freq_epoch': 1, 'batch_size': 8, 'val_batch_size': 1, 'use_hard_negative': True, 'hard_negative_sample_ratio': 0.05, 'hard_negative_max_num': 3000, 'num_pos_per_batch': 1024, 'num_hn_samples_per_batch': 256, 'neg_thresh': 1.4, 'pos_thresh': 0.1, 'neg_weight': 1, 'use_random_scale': True, 'min_scale': 0.8, 'max_scale': 1.2, 'use_random_rotation': True, 'rotation_range': 360, 'train_phase': 'train', 'val_phase': 'val', 'test_phase': 'test', 'stat_freq': 40, 'test_valid': True, 'val_max_iter': 400, 'val_epoch_freq': 1, 'positive_pair_search_voxel_size_multiplier': 1.5, 'hit_ratio_thresh': 0.3, 'triplet_num_pos': 256, 'triplet_num_hn': 512, 'triplet_num_rand': 1024, 'model': 'JointNet', 'backbone_model': 'ResUNetBN2C', 'model_n_out': 32, 'conv1_kernel_size': 5, 'normalize_feature': True, 'dist_type': 'L2', 'best_val_metric': 'feat_match_ratio', 'optimizer': 'SGD', 'max_epoch': 200, 'lr': 0.1, 'momentum': 0.8, 'sgd_momentum': 0.9, 'sgd_dampening': 0.1, 'adam_beta1': 0.9, 'adam_beta2': 0.999, 'weight_decay': 0.0001, 'iter_size': 1, 'bn_momentum': 0.05, 'exp_gamma': 0.99, 'scheduler': 'ExpLR', 'icp_cache_path': '/disk/kitti/', 'use_gpu': True, 'weights': None, 'weights_dir': None, 'resume': None, 'resume_dir': None, 'train_num_thread': 2, 'val_num_thread': 1, 'test_num_thread': 2, 'fast_validation': False, 'nn_max_n': 500, 'dataset': 'ThreeDMatchPairDataset', 'voxel_size': 0.05, 'threed_match_dir': '/cluster/scratch/majing/threedmatch/', 'kitti_root': '/disk/kitti/', 'kaist_root': '/disk_ssd/kaist/', 'kitti_max_time_diff': 3, 'kaist_max_time_diff': 3, 'kitti_date': '2011_09_26', 'kaist_date': '2020_03_10'}
+04/07 01:55:57 Resetting the data loader seed to 0
+04/07 01:56:47 Validation iter 101 / 400 : Data Loading Time: 0.066, Feature Extraction Time: 0.337, Matching Time: 0.080, Loss: 0.863, RTE: 1.724, RRE: 0.718, Hit Ratio: 0.022, Feat Match Ratio: 0.069 Average Meter: 71874058.139
+04/07 01:57:36 Validation iter 201 / 400 : Data Loading Time: 0.071, Feature Extraction Time: 0.337, Matching Time: 0.079, Loss: 0.857, RTE: 1.653, RRE: 0.688, Hit Ratio: 0.026, Feat Match Ratio: 0.114 Average Meter: 71846754.070
+04/07 01:58:23 Validation iter 301 / 400 : Data Loading Time: 0.064, Feature Extraction Time: 0.332, Matching Time: 0.078, Loss: 0.858, RTE: 1.693, RRE: 0.715, Hit Ratio: 0.027, Feat Match Ratio: 0.116 Average Meter: 71844474.472
+04/07 01:59:11 Final Loss: 0.867, RTE: 1.722, RRE: 0.719, Hit Ratio: 0.026, Feat Match Ratio: 0.115
+04/07 01:59:12  Epoch: 1, LR: [0.1]
+04/07 01:59:21 sel0 len: (2048,) sel1 len:(2048,)
+04/07 01:59:21 pos_key len:(330579,)
+04/07 01:59:21 D01 torch.Size([8192]) D10 torch.Size([8192])
+04/07 01:59:21 neg_0: (8192,) neg_1: (8192,)
+04/07 01:59:21 mask0 true:tensor([[5534]]);mask 1 true:tensor([], size=(0, 1), dtype=torch.int64)
+torch.Size([8192]) torch.Size([8192]) torch.Size([8192]) torch.Size([8192])
+04/07 01:59:21  batch 1 Done
+04/07 01:59:22 Train Epoch: 1 [0/914], Current Loss: 2.477e-04, Pos dist: 1.930e+00, Neg dist: 9.756e-02	Data time: 4.8776, Train time: 5.5219, Iter time: 10.3995
+04/07 01:59:25 sel0 len: (2048,) sel1 len:(2048,)
+04/07 01:59:25 pos_key len:(195279,)
+04/07 01:59:25 D01 torch.Size([8192]) D10 torch.Size([8192])
+04/07 01:59:25 neg_0: (8192,) neg_1: (8192,)
+04/07 01:59:25 mask0 true:tensor([[ 219],
+        [1964],
+        [7084]]);mask 1 true:tensor([[1280]])
+torch.Size([8192]) torch.Size([8192]) torch.Size([8192]) torch.Size([8192])
+04/07 01:59:25  batch 1 Done
+04/07 01:59:30 sel0 len: (2048,) sel1 len:(2048,)
+04/07 01:59:30 pos_key len:(369295,)
+04/07 01:59:30 D01 torch.Size([8192]) D10 torch.Size([8192])
+04/07 01:59:30 neg_0: (8192,) neg_1: (8192,)
+04/07 01:59:30 mask0 true:tensor([[5437],
+        [7914]]);mask 1 true:tensor([[1147],
+        [1253],
+        [6283]])
+torch.Size([8192]) torch.Size([8192]) torch.Size([8192]) torch.Size([8192])
+04/07 01:59:30  batch 1 Done
+04/07 01:59:34 sel0 len: (2048,) sel1 len:(2048,)
+04/07 01:59:35 pos_key len:(288556,)
+04/07 01:59:35 D01 torch.Size([8192]) D10 torch.Size([8192])
+04/07 01:59:35 neg_0: (8192,) neg_1: (8192,)
+04/07 01:59:35 mask0 true:tensor([[1656]]);mask 1 true:tensor([[301]])
+torch.Size([8192]) torch.Size([8192]) torch.Size([8192]) torch.Size([8192])
+04/07 01:59:35  batch 1 Done
+04/07 01:59:39 sel0 len: (2048,) sel1 len:(2048,)
+04/07 01:59:39 pos_key len:(298904,)
+04/07 01:59:39 D01 torch.Size([8192]) D10 torch.Size([8192])
+04/07 01:59:39 neg_0: (8192,) neg_1: (8192,)
+04/07 01:59:39 mask0 true:tensor([[799]]);mask 1 true:tensor([], size=(0, 1), dtype=torch.int64)
+torch.Size([8192]) torch.Size([8192]) torch.Size([8192]) torch.Size([8192])
+04/07 01:59:39  batch 1 Done
+04/07 01:59:43 sel0 len: (2048,) sel1 len:(2048,)
+04/07 01:59:43 pos_key len:(233890,)
+04/07 01:59:44 D01 torch.Size([8192]) D10 torch.Size([8192])
+04/07 01:59:44 neg_0: (8192,) neg_1: (8192,)
+04/07 01:59:44 mask0 true:tensor([], size=(0, 1), dtype=torch.int64);mask 1 true:tensor([], size=(0, 1), dtype=torch.int64)
+torch.Size([8192]) torch.Size([8192]) torch.Size([8192]) torch.Size([8192])
+04/07 01:59:44  batch 1 Done
+04/07 01:59:48 sel0 len: (2048,) sel1 len:(2048,)
+04/07 01:59:48 pos_key len:(297208,)
+04/07 01:59:48 D01 torch.Size([8192]) D10 torch.Size([8192])
+04/07 01:59:48 neg_0: (8192,) neg_1: (8192,)
+04/07 01:59:48 mask0 true:tensor([], size=(0, 1), dtype=torch.int64);mask 1 true:tensor([[2607],
+        [4982],
+        [5265],
+        [6144],
+        [7047]])
+torch.Size([8192]) torch.Size([8192]) torch.Size([8192]) torch.Size([8192])
+04/07 01:59:48  batch 1 Done
+Traceback (most recent call last):
+  File "train.py", line 86, in <module>
+    main(config)
+  File "train.py", line 65, in main
+    trainer.train()
+  File "/cluster/scratch/majing/FCGF/lib/trainer.py", line 152, in train
+    self._train_epoch(epoch)
+  File "/cluster/scratch/majing/FCGF/lib/trainer.py", line 865, in _train_epoch
+    out = self.model(sinput0,sinput1,len_batch)
+  File "/cluster/home/majing/.local/lib/python3.7/site-packages/torch/nn/modules/module.py", line 532, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/cluster/scratch/majing/FCGF/model/resunet.py", line 393, in forward
+    score1 = self.detection1(batch_C1,batch_F1,len(len_batch))
+  File "/cluster/home/majing/.local/lib/python3.7/site-packages/torch/nn/modules/module.py", line 532, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/cluster/scratch/majing/FCGF/model/resunet.py", line 266, in forward
+    batch_score = self._detection_score(coords[i],features[i])
+  File "/cluster/scratch/majing/FCGF/model/resunet.py", line 289, in _detection_score
+    every_dist = (((coords_confusion[:, :, 0, :] - coords_confusion[:, :, 1, :]) ** 2).sum(dim=2) ** 0.5)
+RuntimeError: CUDA out of memory. Tried to allocate 15.35 GiB (GPU 0; 31.72 GiB total capacity; 18.89 GiB already allocated; 11.21 GiB free; 18.95 GiB reserved in total by PyTorch)
