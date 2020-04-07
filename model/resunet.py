@@ -389,8 +389,9 @@ class JointNet(nn.Module):
 
     #logging.info(f"Coord_seperation Done")
     #logging.info(f"After append device:{batch_C0[i].device}")
-    score0 = self.detection0(batch_C0,batch_F0,len(len_batch))
-    score1 = self.detection1(batch_C1,batch_F1,len(len_batch))
+    with torch.no_grad():
+      score0 = self.detection0(batch_C0,batch_F0,len(len_batch))
+      score1 = self.detection1(batch_C1,batch_F1,len(len_batch))
 
     return{
      'feature0': feature0,
