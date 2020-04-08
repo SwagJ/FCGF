@@ -376,30 +376,31 @@ class JointNet(nn.Module):
     #print("GPU Usage after faeture Extraction")
     #gpu_usage()
 
-    batch_C1, batch_F1 = [],[]
-    batch_C0, batch_F0 = [],[]
-    start_idx = np.zeros((2,),dtype=int)
-    for i in range(len(len_batch)):
-      end_idx = start_idx + np.array(len_batch[i],dtype=int)
-      #print(start_idx,end_idx)
-      #logging.info(f"Before append device:{sparse0.C.device}")
-      C0 = coord0[start_idx[0]:end_idx[0],1:4]
-      C1 = coord1[start_idx[1]:end_idx[1],1:4]
-      F0 = feature0[start_idx[0]:end_idx[0],:]
-      F1 = feature1[start_idx[1]:end_idx[1],:]
-      #print(C0.shape,C1.shape,F0.shape,F1.shape)
-      batch_C1.append(C1)
-      batch_F1.append(F1)
-      batch_C0.append(C0)
-      batch_F0.append(F0)
-      del C0,C1,F0,F1
-      torch.cuda.empty_cache()
-      start_idx = end_idx
-
-
-    #logging.info(f"Coord_seperation Done")
-    #logging.info(f"After append device:{batch_C0[i].device}")
+    
     with torch.no_grad():
+      batch_C1, batch_F1 = [],[]
+      batch_C0, batch_F0 = [],[]
+      start_idx = np.zeros((2,),dtype=int)
+      for i in range(len(len_batch)):
+        end_idx = start_idx + np.array(len_batch[i],dtype=int)
+        #print(start_idx,end_idx)
+        #logging.info(f"Before append device:{sparse0.C.device}")
+        C0 = coord0[start_idx[0]:end_idx[0],1:4]
+        C1 = coord1[start_idx[1]:end_idx[1],1:4]
+        F0 = feature0[start_idx[0]:end_idx[0],:]
+        F1 = feature1[start_idx[1]:end_idx[1],:]
+        #print(C0.shape,C1.shape,F0.shape,F1.shape)
+        batch_C1.append(C1)
+        batch_F1.append(F1)
+        batch_C0.append(C0)
+        batch_F0.append(F0)
+        del C0,C1,F0,F1
+        torch.cuda.empty_cache()
+        start_idx = end_idx
+
+
+      #logging.info(f"Coord_seperation Done")
+      #logging.info(f"After append device:{batch_C0[i].device}")
       score0 = self.detection0(batch_C0,batch_F0,len(len_batch))
       score1 = self.detection1(batch_C1,batch_F1,len(len_batch))
 
