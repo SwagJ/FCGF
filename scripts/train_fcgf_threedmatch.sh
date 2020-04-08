@@ -24,7 +24,7 @@ export KITTI_PATH=${KITTI_PATH:-/cluster/scratch/majing/kitti/}
 export THREED_PATH=${THREED_PATH:-/cluster/scratch/majing/threedmatch/}
 export VERSION=$(git rev-parse HEAD)
 
-export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/modelnout${MODEL_N_OUT}
+export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/modelnout${MODEL_N_OUT}/lr_rate_${LR}
 export RESUME=None #${OUT_DIR} 
 export PYTHONUNBUFFERED="True"
 

@@ -91,7 +91,7 @@ class AlignmentTrainer:
       raise ValueError('GPU not available, but cuda flag set')
 
     self.optimizer = getattr(optim, config.optimizer)(
-        model.parameters(),
+        filter(lambda p: p.requires_grad, model.parameters()),
         lr=config.lr,
         momentum=config.momentum,
         weight_decay=config.weight_decay)
