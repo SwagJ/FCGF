@@ -337,9 +337,11 @@ class ContrastiveLossTrainer(AlignmentTrainer):
 
       # pairs consist of (xyz1 index, xyz0 index)
       feat_timer.tic()
+      #print(input_dict['sinput0_F'].shape)
       sinput0 = ME.SparseTensor(
           input_dict['sinput0_F'], coords=input_dict['sinput0_C']).to(self.device)
       F0 = self.model(sinput0).F
+      #print(F0.shape)
 
       sinput1 = ME.SparseTensor(
           input_dict['sinput1_F'], coords=input_dict['sinput1_C']).to(self.device)

@@ -413,7 +413,7 @@ class JointNet(nn.Module):
 
 
 
-class ThreeDSmooth(ME.MinkowskiNetwork):
+class ThreeDSmoothNet(ME.MinkowskiNetwork):
   NORM_TYPE = None
   BLOCK_NORM_TYPE = 'BN'
   CHANNELS = [None, 32, 64, 128, 256]
@@ -428,6 +428,8 @@ class ThreeDSmooth(ME.MinkowskiNetwork):
                normalize_feature=None,
                conv1_kernel_size=None,
                D=3):
+    #super(ThreeDSmoothNet, self).__init__()
+
     ME.MinkowskiNetwork.__init__(self, D)
     NORM_TYPE = self.NORM_TYPE
     BLOCK_NORM_TYPE = self.BLOCK_NORM_TYPE
@@ -478,7 +480,7 @@ class ThreeDSmooth(ME.MinkowskiNetwork):
         in_channels=64,
         out_channels=128,
         kernel_size=3,
-        stride=2,
+        stride=1,
         dilation=1,
         has_bias=False,
         dimension=D)
@@ -488,7 +490,7 @@ class ThreeDSmooth(ME.MinkowskiNetwork):
         in_channels=128,
         out_channels=128,
         kernel_size=3,
-        stride=2,
+        stride=1,
         dilation=1,
         has_bias=False,
         dimension=D)
@@ -496,9 +498,9 @@ class ThreeDSmooth(ME.MinkowskiNetwork):
 
     self.conv7 = ME.MinkowskiConvolution(
         in_channels=128,
-        out_channels=32,
-        kernel_size=3,
-        stride=2,
+        out_channels=out_channels,
+        kernel_size=8,
+        stride=1,
         dilation=1,
         has_bias=False,
         dimension=D)
@@ -530,12 +532,14 @@ class ThreeDSmooth(ME.MinkowskiNetwork):
     out = MEF.relu(out)
 
     out = self.conv7(out)
+    #print("out before normal_l2 shape:",out.F.shape)
 
     if self.normalize_feature:
       out = ME.SparseTensor(
           out.F / torch.norm(out.F, p=2, dim=1, keepdim=True),
           coords_key=out.coords_key,
           coords_manager=out.coords_man)
+      #print("out after normal_l2 shape:",out.F.shape)
       return MEF.relu(out)
     else:
       return out
