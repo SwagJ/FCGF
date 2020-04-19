@@ -1,0 +1,358 @@
+Sender: LSF System <lsfadmin@lo-dgx1-001>
+Subject: Job 5733670: <./scripts/train_fcgf_threedmatch.sh bash> in cluster <leonhard> Done
+
+Job <./scripts/train_fcgf_threedmatch.sh bash> was submitted from host <lo-login-01> by user <majing> in cluster <leonhard> at Sun Apr 12 18:58:02 2020
+Job was executed on host(s) <3*lo-dgx1-001>, in queue <gpu.24h>, as user <majing> in cluster <leonhard> at Mon Apr 13 02:04:12 2020
+</cluster/home/majing> was used as the home directory.
+</cluster/scratch/majing/FCGF> was used as the working directory.
+Started at Mon Apr 13 02:04:12 2020
+Terminated at Mon Apr 13 02:05:24 2020
+Results reported at Mon Apr 13 02:05:24 2020
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+./scripts/train_fcgf_threedmatch.sh bash
+------------------------------------------------------------
+
+Successfully completed.
+
+Resource usage summary:
+
+    CPU time :                                   53.81 sec.
+    Max Memory :                                 2182 MB
+    Average Memory :                             355.00 MB
+    Total Requested Memory :                     18000.00 MB
+    Delta Memory :                               15818.00 MB
+    Max Swap :                                   -
+    Max Processes :                              6
+    Max Threads :                                8
+    Run time :                                   82 sec.
+    Turnaround time :                            25642 sec.
+
+The output (if any) follows:
+
+./outputs/ThreeDMatchPairDataset-v0.025/HardestContrastiveLossTrainer/ResUNetBN2C/modelnout16/lr_rate_1e-1
+Host:  lo-dgx1-001
+which: no conda in (/cluster/apps/lsf/10.1/linux3.10-glibc2.17-x86_64/bin:/cluster/apps/local:/cluster/apps/sfos/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/cluster/home/majing/.local/bin:/cluster/home/majing/bin)
+Conda 
+/cluster/scratch/majing/FCGF
+Version:  3b2e5c2742adeb6ca90b131215d4238218560104
+Git diff
+
+diff --git a/scripts/train_fcgf_threedmatch.sh b/scripts/train_fcgf_threedmatch.sh
+index 1f4a523..24f0a96 100755
+--- a/scripts/train_fcgf_threedmatch.sh
++++ b/scripts/train_fcgf_threedmatch.sh
+@@ -5,16 +5,16 @@ export MISC_ARGS=$2
+ 
+ export DATA_ROOT="./outputs"
+ export DATASET=${DATASET:-ThreeDMatchPairDataset}
+-export TRAINER=${TRAINER:-JointLossTrainer}
+-export BACKBONE=${BACKBONE:-ResUNetBN2C}
+-export MODEL=${MODEL:-JointNet}
+-export MODEL_N_OUT=${MODEL_N_OUT:-32}
++export TRAINER=${TRAINER:-HardestContrastiveLossTrainer}
++export BACKBONE=${BACKBONE:-None}
++export MODEL=${MODEL:-ResUNetBN2C}
++export MODEL_N_OUT=${MODEL_N_OUT:-16}
+ export OPTIMIZER=${OPTIMIZER:-SGD}
+ export LR=${LR:-1e-1}
+ export MAX_EPOCH=${MAX_EPOCH:-200}
+ export BATCH_SIZE=${BATCH_SIZE:-4}
+ export ITER_SIZE=${ITER_SIZE:-1}
+-export VOXEL_SIZE=${VOXEL_SIZE:-0.05}
++export VOXEL_SIZE=${VOXEL_SIZE:-0.025}
+ export POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER=${POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER:-1.5}
+ export CONV1_KERNEL_SIZE=${CONV1_KERNEL_SIZE:-5}
+ export EXP_GAMMA=${EXP_GAMMA:-0.99}
+
+Mon Apr 13 02:04:15 2020       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 418.39       Driver Version: 418.39       CUDA Version: 10.1     |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Tesla V100-SXM2...  Off  | 00000000:06:00.0 Off |                    0 |
+| N/A   47C    P0    72W / 300W |      0MiB / 32480MiB |      0%   E. Process |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID   Type   Process name                             Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+
+The following have been reloaded with a version change:
+  1) gcc/4.8.5 => gcc/6.3.0
+
+Requirement already up-to-date: torch in /cluster/home/majing/.local/lib/python3.7/site-packages (1.4.0)
+Requirement already up-to-date: torchvision in /cluster/home/majing/.local/lib/python3.7/site-packages (0.5.0)
+Requirement already satisfied, skipping upgrade: pillow>=4.1.1 in /cluster/apps/python/3.7.4_gpu_gcc630/x86_64/lib64/python3.7/site-packages (from torchvision) (6.2.0)
+Requirement already satisfied, skipping upgrade: six in /cluster/apps/python/3.7.4_gpu_gcc630/x86_64/lib64/python3.7/site-packages (from torchvision) (1.12.0)
+Requirement already satisfied, skipping upgrade: numpy in /cluster/home/majing/.local/lib/python3.7/site-packages (from torchvision) (1.18.2)
+Requirement already up-to-date: numpy in /cluster/home/majing/.local/lib/python3.7/site-packages (1.18.2)
+
+Using built objects
+
+Using BLAS=openblas
+rm -f -rf build dist
+running install
+running bdist_egg
+running egg_info
+writing MinkowskiEngine.egg-info/PKG-INFO
+writing dependency_links to MinkowskiEngine.egg-info/dependency_links.txt
+writing requirements to MinkowskiEngine.egg-info/requires.txt
+writing top-level names to MinkowskiEngine.egg-info/top_level.txt
+reading manifest file 'MinkowskiEngine.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+writing manifest file 'MinkowskiEngine.egg-info/SOURCES.txt'
+installing library code to build/bdist.linux-x86_64/egg
+running install_lib
+running build_py
+creating build
+creating build/lib.linux-x86_64-3.7
+creating build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/SparseTensor.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiChannelwiseConvolution.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiPruning.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiCoords.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiNetwork.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiUnion.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiNormalization.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiNonlinearity.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiBroadcast.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiFunctional.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiConvolution.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/Common.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/__init__.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiPooling.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+copying ./MinkowskiEngine/MinkowskiOps.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine
+creating build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/coords.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/collation.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/quantization.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/gradcheck.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/init.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+copying ./MinkowskiEngine/utils/__init__.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/utils
+creating build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+copying ./MinkowskiEngine/modules/senet_block.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+copying ./MinkowskiEngine/modules/resnet_block.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+copying ./MinkowskiEngine/modules/__init__.py -> build/lib.linux-x86_64-3.7/MinkowskiEngine/modules
+running build_ext
+building 'MinkowskiEngineBackend' extension
+creating build/temp.linux-x86_64-3.7
+creating build/temp.linux-x86_64-3.7/pybind
+/cluster/spack/apps/linux-centos7-x86_64/gcc-4.8.5/gcc-6.3.0-d7fey5ouwb3cw26w5zqafqcse7q3fs6d/bin/gcc -Wno-unused-result -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -ftree-vectorize -march=core-avx2 -mavx2 -ftree-vectorize -march=core-avx2 -mavx2 -fPIC -I./ -I/cluster/apps/python/3.7.4_gpu_gcc630/x86_64/include/python3.7m/.. -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include/torch/csrc/api/include -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include/TH -I/cluster/home/majing/.local/lib/python3.7/site-packages/torch/include/THC -I/cluster/apps/gcc-6.3.0/cuda-10.1.243-n6qg6z5js3zfnhp2cfg5yjccej636czm/include -I/cluster/apps/python/3.7.4_gpu_gcc630/x86_64/include/python3.7m -c pybind/minkowski.cpp -o build/temp.linux-x86_64-3.7/pybind/minkowski.o -Wno-deprecated-declarations -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=MinkowskiEngineBackend -D_GLIBCXX_USE_CXX11_ABI=0 -std=c++11
+/cluster/spack/apps/linux-centos7-x86_64/gcc-4.8.5/gcc-6.3.0-d7fey5ouwb3cw26w5zqafqcse7q3fs6d/bin/g++ -pthread -shared build/temp.linux-x86_64-3.7/pybind/minkowski.o -Lobjs -L/cluster/apps/gcc-6.3.0/cuda-10.1.243-n6qg6z5js3zfnhp2cfg5yjccej636czm/lib64 -L/cluster/apps/python/3.7.4_gpu_gcc630/x86_64/lib64 -lminkowski -lcusparse -lopenblas -lcudart -lpython3.7m -o build/lib.linux-x86_64-3.7/MinkowskiEngineBackend.cpython-37m-x86_64-linux-gnu.so -Wl,-rpath,/cluster/apps/gcc-6.3.0/openblas-0.2.19-jusdys62qhv52qjbsoewvthriekuaynw/lib
+creating build/bdist.linux-x86_64
+creating build/bdist.linux-x86_64/egg
+copying build/lib.linux-x86_64-3.7/MinkowskiEngineBackend.cpython-37m-x86_64-linux-gnu.so -> build/bdist.linux-x86_64/egg
+creating build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/SparseTensor.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+creating build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/modules/senet_block.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/modules/resnet_block.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/modules/__init__.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/modules
+creating build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/coords.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/collation.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/quantization.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/gradcheck.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/init.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/utils/__init__.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine/utils
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiChannelwiseConvolution.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiPruning.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiCoords.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiNetwork.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiUnion.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiNormalization.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiNonlinearity.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiBroadcast.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiFunctional.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiConvolution.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/Common.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/__init__.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiPooling.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+copying build/lib.linux-x86_64-3.7/MinkowskiEngine/MinkowskiOps.py -> build/bdist.linux-x86_64/egg/MinkowskiEngine
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/SparseTensor.py to SparseTensor.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/modules/senet_block.py to senet_block.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/modules/resnet_block.py to resnet_block.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/modules/__init__.py to __init__.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/coords.py to coords.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/collation.py to collation.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/quantization.py to quantization.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/gradcheck.py to gradcheck.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/init.py to init.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/utils/__init__.py to __init__.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiChannelwiseConvolution.py to MinkowskiChannelwiseConvolution.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiPruning.py to MinkowskiPruning.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiCoords.py to MinkowskiCoords.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiNetwork.py to MinkowskiNetwork.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiUnion.py to MinkowskiUnion.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiNormalization.py to MinkowskiNormalization.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiNonlinearity.py to MinkowskiNonlinearity.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiBroadcast.py to MinkowskiBroadcast.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiFunctional.py to MinkowskiFunctional.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiConvolution.py to MinkowskiConvolution.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/Common.py to Common.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/__init__.py to __init__.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiPooling.py to MinkowskiPooling.cpython-37.pyc
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngine/MinkowskiOps.py to MinkowskiOps.cpython-37.pyc
+creating stub loader for MinkowskiEngineBackend.cpython-37m-x86_64-linux-gnu.so
+byte-compiling build/bdist.linux-x86_64/egg/MinkowskiEngineBackend.py to MinkowskiEngineBackend.cpython-37.pyc
+creating build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/PKG-INFO -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/SOURCES.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/dependency_links.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/not-zip-safe -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/requires.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+copying MinkowskiEngine.egg-info/top_level.txt -> build/bdist.linux-x86_64/egg/EGG-INFO
+writing build/bdist.linux-x86_64/egg/EGG-INFO/native_libs.txt
+creating dist
+creating 'dist/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg' and adding 'build/bdist.linux-x86_64/egg' to it
+removing 'build/bdist.linux-x86_64/egg' (and everything under it)
+Processing MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg
+removing '/cluster/home/majing/.local/lib/python3.7/site-packages/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg' (and everything under it)
+creating /cluster/home/majing/.local/lib/python3.7/site-packages/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg
+Extracting MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg to /cluster/home/majing/.local/lib/python3.7/site-packages
+MinkowskiEngine 0.4.2 is already the active version in easy-install.pth
+
+Installed /cluster/home/majing/.local/lib/python3.7/site-packages/MinkowskiEngine-0.4.2-py3.7-linux-x86_64.egg
+Processing dependencies for MinkowskiEngine==0.4.2
+Searching for numpy==1.18.2
+Best match: numpy 1.18.2
+Adding numpy 1.18.2 to easy-install.pth file
+Installing f2py script to /cluster/home/majing/.local/bin
+Installing f2py3 script to /cluster/home/majing/.local/bin
+Installing f2py3.7 script to /cluster/home/majing/.local/bin
+
+Using /cluster/home/majing/.local/lib/python3.7/site-packages
+Searching for torch==1.4.0
+Best match: torch 1.4.0
+Adding torch 1.4.0 to easy-install.pth file
+Installing convert-caffe2-to-onnx script to /cluster/home/majing/.local/bin
+Installing convert-onnx-to-caffe2 script to /cluster/home/majing/.local/bin
+
+Using /cluster/home/majing/.local/lib/python3.7/site-packages
+Finished processing dependencies for MinkowskiEngine==0.4.2
+04/13 02:05:21 ===> Configurations
+04/13 02:05:21     out_dir: ./outputs/ThreeDMatchPairDataset-v0.025/HardestContrastiveLossTrainer/ResUNetBN2C/modelnout16/lr_rate_1e-1
+04/13 02:05:21     trainer: HardestContrastiveLossTrainer
+04/13 02:05:21     save_freq_epoch: 1
+04/13 02:05:21     batch_size: 4
+04/13 02:05:21     val_batch_size: 1
+04/13 02:05:21     use_hard_negative: True
+04/13 02:05:21     hard_negative_sample_ratio: 0.05
+04/13 02:05:21     hard_negative_max_num: 3000
+04/13 02:05:21     num_pos_per_batch: 1024
+04/13 02:05:21     num_hn_samples_per_batch: 256
+04/13 02:05:21     neg_thresh: 1.4
+04/13 02:05:21     pos_thresh: 0.1
+04/13 02:05:21     neg_weight: 1
+04/13 02:05:21     use_random_scale: True
+04/13 02:05:21     min_scale: 0.8
+04/13 02:05:21     max_scale: 1.2
+04/13 02:05:21     use_random_rotation: True
+04/13 02:05:21     rotation_range: 360
+04/13 02:05:21     train_phase: train
+04/13 02:05:21     val_phase: val
+04/13 02:05:21     test_phase: test
+04/13 02:05:21     stat_freq: 40
+04/13 02:05:21     test_valid: True
+04/13 02:05:21     val_max_iter: 400
+04/13 02:05:21     val_epoch_freq: 1
+04/13 02:05:21     positive_pair_search_voxel_size_multiplier: 1.5
+04/13 02:05:21     hit_ratio_thresh: 0.3
+04/13 02:05:21     triplet_num_pos: 256
+04/13 02:05:21     triplet_num_hn: 512
+04/13 02:05:21     triplet_num_rand: 1024
+04/13 02:05:21     model: ResUNetBN2C
+04/13 02:05:21     backbone_model: None
+04/13 02:05:21     model_n_out: 16
+04/13 02:05:21     conv1_kernel_size: 5
+04/13 02:05:21     normalize_feature: True
+04/13 02:05:21     dist_type: L2
+04/13 02:05:21     best_val_metric: feat_match_ratio
+04/13 02:05:21     optimizer: SGD
+04/13 02:05:21     max_epoch: 200
+04/13 02:05:21     lr: 0.1
+04/13 02:05:21     momentum: 0.8
+04/13 02:05:21     sgd_momentum: 0.9
+04/13 02:05:21     sgd_dampening: 0.1
+04/13 02:05:21     adam_beta1: 0.9
+04/13 02:05:21     adam_beta2: 0.999
+04/13 02:05:21     weight_decay: 0.0001
+04/13 02:05:21     iter_size: 1
+04/13 02:05:21     bn_momentum: 0.05
+04/13 02:05:21     exp_gamma: 0.99
+04/13 02:05:21     scheduler: ExpLR
+04/13 02:05:21     icp_cache_path: /disk/kitti/
+04/13 02:05:21     use_gpu: True
+04/13 02:05:21     weights: None
+04/13 02:05:21     weights_dir: None
+04/13 02:05:21     resume: None
+04/13 02:05:21     resume_dir: None
+04/13 02:05:21     train_num_thread: 2
+04/13 02:05:21     val_num_thread: 1
+04/13 02:05:21     test_num_thread: 2
+04/13 02:05:21     fast_validation: False
+04/13 02:05:21     nn_max_n: 500
+04/13 02:05:21     dataset: ThreeDMatchPairDataset
+04/13 02:05:21     voxel_size: 0.025
+04/13 02:05:21     threed_match_dir: /cluster/scratch/majing/threedmatch/
+04/13 02:05:21     kitti_root: /disk/kitti/
+04/13 02:05:21     kaist_root: /disk_ssd/kaist/
+04/13 02:05:21     kitti_max_time_diff: 3
+04/13 02:05:21     kaist_max_time_diff: 3
+04/13 02:05:21     kitti_date: 2011_09_26
+04/13 02:05:21     kaist_date: 2020_03_10
+04/13 02:05:21 Loading the subset train from /cluster/scratch/majing/threedmatch/
+04/13 02:05:23 Loading the subset val from /cluster/scratch/majing/threedmatch/
+04/13 02:05:23 Invalid model index. You put None. Options are:
+04/13 02:05:23 	* SimpleNet
+04/13 02:05:23 	* SimpleNet2
+04/13 02:05:23 	* SimpleNet3
+04/13 02:05:23 	* SimpleNetBN
+04/13 02:05:23 	* SimpleNetBN2
+04/13 02:05:23 	* SimpleNetBN2B
+04/13 02:05:23 	* SimpleNetBN2C
+04/13 02:05:23 	* SimpleNetBN2D
+04/13 02:05:23 	* SimpleNetBN2E
+04/13 02:05:23 	* SimpleNetBN3
+04/13 02:05:23 	* SimpleNetBN3B
+04/13 02:05:23 	* SimpleNetBN3C
+04/13 02:05:23 	* SimpleNetBN3D
+04/13 02:05:23 	* SimpleNetBN3E
+04/13 02:05:23 	* SimpleNetBNE
+04/13 02:05:23 	* SimpleNetIN
+04/13 02:05:23 	* SimpleNetIN2
+04/13 02:05:23 	* SimpleNetIN2E
+04/13 02:05:23 	* SimpleNetIN3
+04/13 02:05:23 	* SimpleNetIN3E
+04/13 02:05:23 	* SimpleNetINE
+04/13 02:05:23 	* JointNet
+04/13 02:05:23 	* ResUNet2
+04/13 02:05:23 	* ResUNetBN2
+04/13 02:05:23 	* ResUNetBN2B
+04/13 02:05:23 	* ResUNetBN2C
+04/13 02:05:23 	* ResUNetBN2D
+04/13 02:05:23 	* ResUNetBN2E
+04/13 02:05:23 	* ResUNetIN2
+04/13 02:05:23 	* ResUNetIN2B
+04/13 02:05:23 	* ResUNetIN2C
+04/13 02:05:23 	* ResUNetIN2D
+04/13 02:05:23 	* ResUNetIN2E
+Traceback (most recent call last):
+  File "train.py", line 86, in <module>
+    main(config)
+  File "train.py", line 62, in main
+    val_data_loader=val_loader,
+  File "/cluster/scratch/majing/FCGF/lib/trainer.py", line 203, in __init__
+    AlignmentTrainer.__init__(self, config, data_loader, val_data_loader)
+  File "/cluster/scratch/majing/FCGF/lib/trainer.py", line 57, in __init__
+    D=3)
+TypeError: __init__() got multiple values for argument 'bn_momentum'
