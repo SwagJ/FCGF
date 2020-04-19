@@ -413,6 +413,133 @@ class JointNet(nn.Module):
 
 
 
+class ThreeDSmooth(ME.MinkowskiNetwork):
+  NORM_TYPE = None
+  BLOCK_NORM_TYPE = 'BN'
+  CHANNELS = [None, 32, 64, 128, 256]
+  TR_CHANNELS = [None, 32, 64, 64, 128]
+
+  # To use the model, must call initialize_coords before forward pass.
+  # Once data is processed, call clear to reset the model before calling initialize_coords
+  def __init__(self,
+               in_channels=3,
+               out_channels=32,
+               bn_momentum=0.1,
+               normalize_feature=None,
+               conv1_kernel_size=None,
+               D=3):
+    ME.MinkowskiNetwork.__init__(self, D)
+    NORM_TYPE = self.NORM_TYPE
+    BLOCK_NORM_TYPE = self.BLOCK_NORM_TYPE
+    CHANNELS = self.CHANNELS
+    TR_CHANNELS = self.TR_CHANNELS
+    self.normalize_feature = normalize_feature
+    self.conv1 = ME.MinkowskiConvolution(
+        in_channels=in_channels,
+        out_channels=32,
+        kernel_size=conv1_kernel_size,
+        stride=1,
+        dilation=1,
+        has_bias=False,
+        dimension=D)
+    self.norm1 = ME.MinkowskiBatchNorm(32, momentum=bn_momentum)
+
+    self.conv2 = ME.MinkowskiConvolution(
+        in_channels=32,
+        out_channels=32,
+        kernel_size=3,
+        stride=1,
+        dilation=1,
+        has_bias=False,
+        dimension=D)
+    self.norm2 = ME.MinkowskiBatchNorm(32, momentum=bn_momentum)
+
+    self.conv3 = ME.MinkowskiConvolution(
+        in_channels=32,
+        out_channels=64,
+        kernel_size=3,
+        stride=1,
+        dilation=1,
+        has_bias=False,
+        dimension=D)
+    self.norm3 = ME.MinkowskiBatchNorm(64, momentum=bn_momentum)
+
+    self.conv4 = ME.MinkowskiConvolution(
+        in_channels=64,
+        out_channels=64,
+        kernel_size=3,
+        stride=1,
+        dilation=1,
+        has_bias=False,
+        dimension=D)
+    self.norm4 = ME.MinkowskiBatchNorm(64, momentum=bn_momentum)
+
+    self.conv5 = ME.MinkowskiConvolution(
+        in_channels=64,
+        out_channels=128,
+        kernel_size=3,
+        stride=2,
+        dilation=1,
+        has_bias=False,
+        dimension=D)
+    self.norm5 = ME.MinkowskiBatchNorm(128, momentum=bn_momentum)
+
+    self.conv6 = ME.MinkowskiConvolution(
+        in_channels=128,
+        out_channels=128,
+        kernel_size=3,
+        stride=2,
+        dilation=1,
+        has_bias=False,
+        dimension=D)
+    self.norm6 = ME.MinkowskiBatchNorm(128, momentum=bn_momentum)
+
+    self.conv7 = ME.MinkowskiConvolution(
+        in_channels=128,
+        out_channels=32,
+        kernel_size=3,
+        stride=2,
+        dilation=1,
+        has_bias=False,
+        dimension=D)
+    #self.norm7 = ME.MinkowskiBatchNorm(32, momentum=bn_momentum)
+
+  def forward(self, x):
+    out = self.conv1(x)
+    out = self.norm1(out)
+    out = MEF.relu(out)
+
+    out = self.conv2(out)
+    out = self.norm2(out)
+    out = MEF.relu(out)
+
+    out = self.conv3(out)
+    out = self.norm3(out)
+    out = MEF.relu(out)
+
+    out = self.conv4(out)
+    out = self.norm4(out)
+    out = MEF.relu(out)
+
+    out = self.conv5(out)
+    out = self.norm5(out)
+    out = MEF.relu(out)
+
+    out = self.conv6(out)
+    out = self.norm6(out)
+    out = MEF.relu(out)
+
+    out = self.conv7(out)
+
+    if self.normalize_feature:
+      out = ME.SparseTensor(
+          out.F / torch.norm(out.F, p=2, dim=1, keepdim=True),
+          coords_key=out.coords_key,
+          coords_manager=out.coords_man)
+      return MEF.relu(out)
+    else:
+      return out
+
 
 
 
