@@ -64,7 +64,7 @@ trainer_arg.add_argument('--triplet_num_rand', type=int, default=1024)
 # dNetwork specific configurations
 net_arg = add_argument_group('Network')
 net_arg.add_argument('--model', type=str, default='ResUNetBN2C')
-net_arg.add_argument('--backbone_model', type=str, default=None)
+net_arg.add_argument('--backbone_model', type=str, default='None')
 net_arg.add_argument('--model_n_out', type=int, default=32, help='Feature dimension')
 net_arg.add_argument('--conv1_kernel_size', type=int, default=5)
 net_arg.add_argument('--normalize_feature', type=str2bool, default=True)

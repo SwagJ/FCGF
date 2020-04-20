@@ -21,7 +21,7 @@ export EXP_GAMMA=${EXP_GAMMA:-0.99}
 export RANDOM_SCALE=${RANDOM_SCALE:-True}
 export TIME=$(date +"%Y-%m-%d_%H-%M-%S")
 export KITTI_PATH=${KITTI_PATH:-/cluster/scratch/majing/kitti/}
-export THREED_PATH=${THREED_PATH:-/cluster/scratch/majing/threedmatch/}
+export THREED_PATH=${THREED_PATH:-/disk_ssd/threedmatch/}
 export VERSION=$(git rev-parse HEAD)
 
 export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/modelnout${MODEL_N_OUT}/lr_rate_${LR}
@@ -45,14 +45,14 @@ echo "" | tee -a $LOG
 nvidia-smi | tee -a $LOG
 
 module load eth_proxy gcc/6.3.0 python_gpu/3.7.4 cuda/10.1.243 openblas/0.2.19
-pip install --upgrade --user torch torchvision
-pip install --upgrade --user numpy
+#pip install --upgrade --user torch torchvision
+#pip install --upgrade --user numpy
 
-export BLAS_INCLUDE_DIRS=$OPENBLAS_ROOT/include
-export BLAS_LIBRARY_DIRS=$OPENBLAS_ROOT/lib
-cd /cluster/scratch/majing/FCGF/MinkowskiEngine
-python setup.py install --blas=openblas --user --keep_objs
-cd /cluster/scratch/majing/FCGF/
+#export BLAS_INCLUDE_DIRS=$OPENBLAS_ROOT/include
+#export BLAS_LIBRARY_DIRS=$OPENBLAS_ROOT/lib
+#cd /cluster/scratch/majing/FCGF/MinkowskiEngine
+#python setup.py install --blas=openblas --user --keep_objs
+#cd /cluster/scratch/majing/FCGF/
 
 # Training
 python train.py \

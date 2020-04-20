@@ -43,7 +43,9 @@ class AlignmentTrainer:
     torch.backends.cudnn.enabled = True
 
     Model = load_model(config.model)
-    if config.backbone_model is not None:
+    #print("Config.backbone_model:",config.backbone_model)
+    if config.backbone_model != 'None':
+      #print("Using Backbone Model")
       self.backbone_model = load_model(config.backbone_model)
       model = Model(
         self.device,
