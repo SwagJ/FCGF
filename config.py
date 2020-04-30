@@ -127,6 +127,7 @@ data_arg.add_argument(
     help='max time difference between pairs (non inclusive)')
 data_arg.add_argument('--kitti_date', type=str, default='2011_09_26')
 data_arg.add_argument('--kaist_date', type=str, default='2020_03_10')
+data_arg.add_argument('--get_feature', type=str2bool, default=False)
 
 
 def get_config():

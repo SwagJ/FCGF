@@ -7,7 +7,7 @@ export DATA_ROOT="./outputs"
 export DATASET=${DATASET:-ThreeDMatchPairDataset}
 export TRAINER=${TRAINER:-HardestContrastiveLossTrainer}
 export BACKBONE=${BACKBONE:-None}
-export MODEL=${MODEL:-ThreeDSmoothNet}
+export MODEL=${MODEL:-ResUNetBN2C}
 export MODEL_N_OUT=${MODEL_N_OUT:-16}
 export OPTIMIZER=${OPTIMIZER:-SGD}
 export LR=${LR:-1e-1}
@@ -25,10 +25,13 @@ export THREED_PATH=${THREED_PATH:-/disk_ssd/threedmatch/}
 export VERSION=$(git rev-parse HEAD)
 
 export OUT_DIR=${DATA_ROOT}/${DATASET}-v${VOXEL_SIZE}/${TRAINER}/${MODEL}/modelnout${MODEL_N_OUT}/lr_rate_${LR}
-export RESUME=None #${OUT_DIR} 
+export RESUME=${OUT_DIR} 
 export PYTHONUNBUFFERED="True"
+export OUT_PTH=${OUT_DIR}/checkpoint.pth
+export BEST_PATH=${OUT_DIR}/best_val_checkpoint.pth
 
 echo $OUT_DIR
+echo $OUT_PTH
 
 mkdir -m 755 -p $OUT_DIR
 
@@ -38,9 +41,9 @@ echo "Host: " $(hostname) | tee -a $LOG
 echo "Conda " $(which conda) | tee -a $LOG
 echo $(pwd) | tee -a $LOG
 echo "Version: " $VERSION | tee -a $LOG
-echo "Git diff" | tee -a $LOG
+#echo "Git diff" | tee -a $LOG
 echo "" | tee -a $LOG
-git diff | tee -a $LOG
+#git diff | tee -a $LOG
 echo "" | tee -a $LOG
 nvidia-smi | tee -a $LOG
 
@@ -73,8 +76,10 @@ python train.py \
 	--positive_pair_search_voxel_size_multiplier ${POSITIVE_PAIR_SEARCH_VOXEL_SIZE_MULTIPLIER} \
 	--threed_match_dir ${THREED_PATH} \
 	--hit_ratio_thresh 0.3 \
-	#--icp_cache_path "/disk/kitti/icp" \
-	#--resume ${OUT_DIR} \
+	--get_feature True\
+	#--resume_dir ${OUT_DIR} \
+	#--resume ${OUT_PTH} \
+	#--get_feature False \
 	$MISC_ARGS 2>&1 | tee -a $LOG
 
 # Test

@@ -1,0 +1,8 @@
+7-scenes-redkitchen 60
+sun3d-home_at-home_at_scan1_2013_jan_1 60
+sun3d-home_md-home_md_scan9_2012_sep_30 60
+sun3d-hotel_uc-scan3 55
+sun3d-hotel_umd-maryland_hotel1 57
+sun3d-hotel_umd-maryland_hotel3 37
+sun3d-mit_76_studyroom-76-1studyroom2 66
+sun3d-mit_lab_hj-lab_hj_tea_nov_2_2012_scan1_erika 38

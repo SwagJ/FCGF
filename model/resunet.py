@@ -435,6 +435,7 @@ class ThreeDSmoothNet(ME.MinkowskiNetwork):
     BLOCK_NORM_TYPE = self.BLOCK_NORM_TYPE
     CHANNELS = self.CHANNELS
     TR_CHANNELS = self.TR_CHANNELS
+    #self.in_channels = in_channels
     self.normalize_feature = normalize_feature
     self.conv1 = ME.MinkowskiConvolution(
         in_channels=in_channels,
@@ -507,6 +508,7 @@ class ThreeDSmoothNet(ME.MinkowskiNetwork):
     #self.norm7 = ME.MinkowskiBatchNorm(32, momentum=bn_momentum)
 
   def forward(self, x):
+    #print("self.in_channels:", self.in_channels)
     out = self.conv1(x)
     out = self.norm1(out)
     out = MEF.relu(out)

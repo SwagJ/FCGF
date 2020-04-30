@@ -46,6 +46,8 @@ def main(config, resume=False):
       config.batch_size,
       num_threads=config.train_num_thread)
 
+  #print("length of train loader is ",len(train_loader))
+
   if config.test_valid:
     val_loader = make_data_loader(
         config,
@@ -55,6 +57,7 @@ def main(config, resume=False):
   else:
     val_loader = None
 
+  #print("length of val loader is ",len(val_loader))
   Trainer = get_trainer(config.trainer)
   trainer = Trainer(
       config=config,
@@ -76,6 +79,7 @@ if __name__ == "__main__":
       if k not in ['resume_dir'] and k in resume_config:
         dconfig[k] = resume_config[k]
     dconfig['resume'] = resume_config['out_dir'] + '/checkpoint.pth'
+    print("Loading Previous Checkpoint")
 
   logging.info('===> Configurations')
   for k in dconfig:

@@ -41,6 +41,10 @@ class AlignmentTrainer:
     self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.enabled = True
+    print("config.get_feature:",config.get_feature)
+
+    if config.get_feature == True:
+      num_feats = 10
 
     Model = load_model(config.model)
     #print("Config.backbone_model:",config.backbone_model)
@@ -343,6 +347,10 @@ class ContrastiveLossTrainer(AlignmentTrainer):
       sinput0 = ME.SparseTensor(
           input_dict['sinput0_F'], coords=input_dict['sinput0_C']).to(self.device)
       F0 = self.model(sinput0).F
+      output0 = self.model(sinput0)
+      dense_tensor = output0.dense()
+      #print("output dense tensor dimension:", dense_tensor[0].shape)
+      #print("stride is ",dense_tensor[2])
       #print(F0.shape)
 
       sinput1 = ME.SparseTensor(

@@ -15,6 +15,7 @@ class CameraPose:
 
 def read_trajectory(filename, dim=4):
   traj = []
+  print(filename)
   assert os.path.exists(filename)
   with open(filename, 'r') as f:
     metastr = f.readline()

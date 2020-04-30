@@ -22,6 +22,11 @@ import open3d as o3d
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
+from lib.timer import Timer
+#from lib.feature_extraction import prepare_feature
+import ntpath
+from sklearn.preprocessing import normalize
+
 
 kitti_cache = {}
 kitti_icp_cache = {}
@@ -37,6 +42,9 @@ def collate_pair_fn(list_data):
 
   batch_id = 0
   curr_start_inds = np.zeros((1, 2))
+  #logging.info(f"feature lenth {np.shape(feats0)}")
+  #logging.info(f"coord length {np.shape(coords0)}")
+
 
   def to_tensor(x):
     if isinstance(x, torch.Tensor):
@@ -125,6 +133,7 @@ class PairDataset(torch.utils.data.Dataset):
     self.random_rotation = random_rotation
     self.rotation_range = config.rotation_range
     self.randg = np.random.RandomState()
+    #self.get_feature = config.get_feature
     if manual_seed:
       self.reset_seed()
 
@@ -156,6 +165,7 @@ class IndoorPairDataset(PairDataset):
     PairDataset.__init__(self, phase, transform, random_rotation, random_scale,
                          manual_seed, config)
     self.root = root = config.threed_match_dir
+    self.get_feature = config.get_feature
     logging.info(f"Loading the subset {phase} from {root}")
 
     subset_names = open(self.DATA_FILES[phase]).read().split()
@@ -168,11 +178,22 @@ class IndoorPairDataset(PairDataset):
           content = f.readlines()
         fnames = [x.strip().split() for x in content]
         for fname in fnames:
-          self.files.append([fname[0], fname[1]])
+          #print(fname)
+          tmp0 = np.load(root + fname[0], allow_pickle=True)['pcd']
+          tmp1 = np.load(root + fname[1], allow_pickle=True)['pcd']
+          if (tmp0.shape[0] != 0) and (tmp1.shape[0] != 0):
+            self.files.append([fname[0], fname[1]])
+          else:
+            logging.info(f"files has no pcd:{fname[0]} {fname[1]}")
 
   def __getitem__(self, idx):
     file0 = os.path.join(self.root, self.files[idx][0])
     file1 = os.path.join(self.root, self.files[idx][1])
+    abs_dir0 = os.path.splitext(file0)[0]
+    abs_dir1 = os.path.splitext(file1)[0]
+    ntpath.basename(self.root)
+    featname0 = self.root + 'features/' + ntpath.split(abs_dir0)[1] + '.npy'
+    featname1 = self.root + 'features/' + ntpath.split(abs_dir1)[1] + '.npy'
     data0 = np.load(file0,allow_pickle=True)
     data1 = np.load(file1,allow_pickle=True)
     xyz0 = data0["pcd"]
@@ -203,8 +224,10 @@ class IndoorPairDataset(PairDataset):
     sel1 = ME.utils.sparse_quantize(xyz1 / self.voxel_size, return_index=True)
 
     # Make point clouds using voxelized points
+    #print("before:", xyz0.shape)
     pcd0 = make_open3d_point_cloud(xyz0)
     pcd1 = make_open3d_point_cloud(xyz1)
+
 
     # Select features and points using the returned voxelized indices
     pcd0.colors = o3d.utility.Vector3dVector(color0[sel0])
@@ -217,7 +240,10 @@ class IndoorPairDataset(PairDataset):
     # Get features
     npts0 = len(pcd0.colors)
     npts1 = len(pcd1.colors)
-
+    #print("pcd0 color dim", np.shape(pcd0.colors))
+    #print("pcd1 color dim", np.shape(pcd1.colors))
+    #print("pcd0 color len:",npts0)
+    #print("pcd1 color len:",npts1)
     feats_train0, feats_train1 = [], []
 
     feats_train0.append(np.ones((npts0, 1)))
@@ -229,13 +255,30 @@ class IndoorPairDataset(PairDataset):
     # Get coords
     xyz0 = np.array(pcd0.points)
     xyz1 = np.array(pcd1.points)
+    #print("after:",xyz0.shape)
 
     coords0 = np.floor(xyz0 / self.voxel_size)
     coords1 = np.floor(xyz1 / self.voxel_size)
+    #print("Max in pcd0 coord:",np.max(coords0,axis=0))
+    #print("Min in pcd0 coord:",np.min(coords0,axis=0))
+    #print("Max in pcd1 coord:",np.max(coords1,axis=0))
+    #print("Min in pcd1 coord:",np.min(coords1,axis=0))
 
     if self.transform:
       coords0, feats0 = self.transform(coords0, feats0)
       coords1, feats1 = self.transform(coords1, feats1)
+
+    if self.get_feature == True:
+      feats0 = np.load(featname0, allow_pickle=True)
+      feats1 = np.load(featname1, allow_pickle=True)
+      feats0 = feats0[sel0]
+      feats1 = feats1[sel1]
+      feats0 = normalize(feats0)
+      feats1 = normalize(feats1)
+
+    #print("coords shape:",coords0.shape)
+    #print("feature shape:", feats0.shape)
+
 
     return (xyz0, xyz1, coords0, coords1, feats0, feats1, matches, trans)
 
@@ -266,6 +309,7 @@ class KITTIPairDataset(PairDataset):
       self.root = root = os.path.join(config.kitti_root, self.date)
 
     self.icp_path = os.path.join(config.kitti_root, 'icp')
+    self.get_feature = config.get_feature
     pathlib.Path(self.icp_path).mkdir(parents=True, exist_ok=True)
 
     PairDataset.__init__(self, phase, transform, random_rotation, random_scale,
@@ -389,6 +433,15 @@ class KITTIPairDataset(PairDataset):
               drive, t)
     return fname
 
+  def _get_feature_fn(self, drive, t):
+    if self.IS_ODOMETRY:
+      fname = self.root + '/sequences/%02d/features/%06d.npy' % (drive, t)
+    else:
+      fname = self.root + \
+          '/' + self.date + '_drive_%04d_sync/velodyne_points/data/%010d.bin' % (
+              drive, t)
+    return fname
+
   def __getitem__(self, idx):
     drive = self.files[idx][0]
     t0, t1 = self.files[idx][1], self.files[idx][2]
@@ -396,6 +449,9 @@ class KITTIPairDataset(PairDataset):
     positions = [self.odometry_to_positions(odometry) for odometry in all_odometry]
     fname0 = self._get_velodyne_fn(drive, t0)
     fname1 = self._get_velodyne_fn(drive, t1)
+    if self.get_feature == True:
+      featname0 = self._get_feature_fn(drive,t0)
+      featname1 = self._get_feature_fn(drive,t1)
 
     # XYZ and reflectance
     xyzr0 = np.fromfile(fname0, dtype=np.float32).reshape(-1, 4)
@@ -489,6 +545,14 @@ class KITTIPairDataset(PairDataset):
       coords0, feats0 = self.transform(coords0, feats0)
       coords1, feats1 = self.transform(coords1, feats1)
 
+    if self.get_feature == True:
+      feats0 = np.load(featname0, allow_pickle=True)
+      feats1 = np.load(featname1, allow_pickle=True)
+      feats0 = feats0[sel0]
+      feats1 = feats1[sel1]
+      feats0 = normalize(feats0)
+      feats1 = normalize(feats1)
+
     return (unique_xyz0_th.float(), unique_xyz1_th.float(), coords0.int(),
             coords1.int(), feats0.float(), feats1.float(), matches, trans)
 
@@ -514,6 +578,7 @@ class KITTINMPairDataset(KITTIPairDataset):
       self.root = root = os.path.join(config.kitti_root, self.date)
 
     self.icp_path = os.path.join(config.kitti_root, 'icp')
+    self.get_feature = config.get_feature
     pathlib.Path(self.icp_path).mkdir(parents=True, exist_ok=True)
 
     PairDataset.__init__(self, phase, transform, random_rotation, random_scale,
