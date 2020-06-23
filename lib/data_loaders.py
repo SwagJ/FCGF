@@ -12,7 +12,7 @@ import os
 from scipy.linalg import expm, norm
 import pathlib
 
-from util.pointcloud import get_matching_indices, make_open3d_point_cloud
+from util.pointcloud import get_matching_indices, make_open3d_point_cloud, get_neighbor_indices, get_hardest_neigative_indices
 import lib.transforms as t
 
 import MinkowskiEngine as ME
@@ -23,6 +23,7 @@ from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 from lib.timer import Timer
+from lib.metrics import pdist
 #from lib.feature_extraction import prepare_feature
 import ntpath
 from sklearn.preprocessing import normalize
@@ -35,15 +36,28 @@ kaist_icp_cache = {}
 
 
 def collate_pair_fn(list_data):
-  xyz0, xyz1, coords0, coords1, feats0, feats1, matching_inds, trans = list(
+  xyz0, xyz1, coords0, coords1, feats0, feats1, matching_inds, trans, sample_num, neighbor0, neighbor1,num_neighbor0,num_neighbor1 = list(
       zip(*list_data))
   xyz_batch0, xyz_batch1 = [], []
   matching_inds_batch, trans_batch, len_batch = [], [], []
+  coords0_in_batch,coords1_in_batch = [],[]
+  unique_match = []
+  centroid_in_batch = []
+  max_in_batch = []
+  neighbor0_in_batch = []
+  neighbor1_in_batch = []
+  num_neighbor0_in_batch = []
+  num_neighbor1_in_batch = []
+  correspondance_in_batch = []
+  #neg_ind_in_batch=[]
+  pos1_coord_in_batch = []
+  pos0_coord_in_batch = []
 
   batch_id = 0
   curr_start_inds = np.zeros((1, 2))
-  #logging.info(f"feature lenth {np.shape(feats0)}")
-  #logging.info(f"coord length {np.shape(coords0)}")
+  #print(sample_num)
+  sample_num = min(sample_num)
+
 
 
   def to_tensor(x):
@@ -57,13 +71,63 @@ def collate_pair_fn(list_data):
   for batch_id, _ in enumerate(coords0):
     N0 = coords0[batch_id].shape[0]
     N1 = coords1[batch_id].shape[0]
+    #print("num of points:",N0,N1)
+    #print("neighborhood0 size:",neighbor0[batch_id].shape)
+    #print("neighborhood1 size:",neighbor1[batch_id].shape)
+    neighbor0_in_batch.append(to_tensor(neighbor0[batch_id]))
+    neighbor1_in_batch.append(to_tensor(neighbor1[batch_id]))
+
+    num_neighbor0_in_batch.append(to_tensor(num_neighbor0[batch_id]))
+    num_neighbor1_in_batch.append(to_tensor(num_neighbor1[batch_id]))
 
     xyz_batch0.append(to_tensor(xyz0[batch_id]))
     xyz_batch1.append(to_tensor(xyz1[batch_id]))
+    #points normalization
+    coord0_i = to_tensor(coords0[batch_id]).float()
+    coord1_i = to_tensor(coords1[batch_id]).float()
+    #print("coord0_i shape:",coord0_i.shape)
+    #print("coord1_i shape:",coord1_i.shape)
+
+    batch_corr = np.array(matching_inds[batch_id])
+
+    # normalization
+    centroid0 = torch.mean(coord0_i, axis=0)
+    centroid1 = torch.mean(coord1_i, axis=0)
+    centroid_in_batch.append([centroid0,centroid1])
+    #print(centroid0,centroid1)
+    centered0 = coord0_i - centroid0
+    centered1 = coord1_i - centroid1
+    max0 = torch.max(torch.sqrt(torch.sum(abs(centered0)**2,axis=-1)))
+    max1 = torch.max(torch.sqrt(torch.sum(abs(centered1)**2,axis=-1)))
+    max_in_batch.append([max0,max1])
+    normed_coords0 = centered0 / max0
+    normed_coords1 = centered1 / max1
+
+    #sample points in batch
+    sel0 = np.random.choice(N0, sample_num, replace=False)
+    sel1 = np.random.choice(N1, sample_num, replace=False)
+
+
+    coords0_in_batch.append(normed_coords0[sel0,:].float())
+    coords1_in_batch.append(normed_coords1[sel1,:].float())
+
+    #sample positive correspondance
+    _,unique_idx = np.unique(batch_corr[:,0],return_index=True)
+    #unique_idx = torch.from_numpy(unique_idx)
+    corr_match_idx = batch_corr[unique_idx]
+    pos0_coord = normed_coords0[corr_match_idx[:,0],:]
+    pos1_coord = normed_coords1[corr_match_idx[:,1],:]
+    pos0_coord_in_batch.append(to_tensor(pos0_coord))
+    pos1_coord_in_batch.append(to_tensor(pos1_coord))
+
 
     trans_batch.append(to_tensor(trans[batch_id]))
+    #neg_ind_in_batch.append(to_tensor(neg_inds[batch_id]).int())
 
     matching_inds_batch.append(
+        torch.from_numpy(np.array(matching_inds[batch_id])).int())
+
+    correspondance_in_batch.append(
         torch.from_numpy(np.array(matching_inds[batch_id]) + curr_start_inds))
     len_batch.append([N0, N1])
 
@@ -71,14 +135,23 @@ def collate_pair_fn(list_data):
     curr_start_inds[0, 0] += N0
     curr_start_inds[0, 1] += N1
 
+  #print("before sparse_collate:",coords0[0].shape)
   coords_batch0, feats_batch0 = ME.utils.sparse_collate(coords0, feats0)
   coords_batch1, feats_batch1 = ME.utils.sparse_collate(coords1, feats1)
+  #print("after sparse_collate:",coords_batch0.shape)
 
   # Concatenate all lists
   xyz_batch0 = torch.cat(xyz_batch0, 0).float()
   xyz_batch1 = torch.cat(xyz_batch1, 0).float()
   trans_batch = torch.cat(trans_batch, 0).float()
-  matching_inds_batch = torch.cat(matching_inds_batch, 0).int()
+  #matching_inds_batch = torch.cat(matching_inds_batch, 0).int()
+  correspondance_in_batch = torch.cat(correspondance_in_batch, 0).int()
+  coords0_downsampled = torch.stack(coords0_in_batch,0).float()
+  coords1_downsampled = torch.stack(coords1_in_batch,0).float()
+  #coords0 = to_tensor(np.array(coords0).astype(np.float32))
+  #coords1 = to_tensor(np.array(coords1).astype(np.float32))
+  #print(matching_inds_batch[0:100,:])
+
 
   return {
       'pcd0': xyz_batch0,
@@ -87,12 +160,21 @@ def collate_pair_fn(list_data):
       'sinput0_F': feats_batch0.float(),
       'sinput1_C': coords_batch1,
       'sinput1_F': feats_batch1.float(),
-      'correspondences': matching_inds_batch,
-      'matching_inds': matching_inds,
+      'correspondences': correspondance_in_batch,
+    #  'matching_inds': matching_inds_batch,
+    #  'pos0' : pos0_coord_in_batch,
+    #  'pos1' : pos1_coord_in_batch,
       'T_gt': trans_batch,
       'len_batch': len_batch,
-      'N0': N0,
-      'N1': N1
+      'coords0': coords0_downsampled,
+      'coords1': coords1_downsampled,
+      'centroid': centroid_in_batch,
+      'max': max_in_batch,
+      'neighbor0': neighbor0_in_batch,
+      'neighbor1': neighbor1_in_batch,
+      'num_neighbor0': num_neighbor0_in_batch,
+      'num_neighbor1': num_neighbor1_in_batch,
+      #'neg_inds': neg_ind_in_batch
   }
 
 
@@ -166,6 +248,7 @@ class IndoorPairDataset(PairDataset):
                          manual_seed, config)
     self.root = root = config.threed_match_dir
     self.get_feature = config.get_feature
+    self.sample_num = config.sample_num
     logging.info(f"Loading the subset {phase} from {root}")
 
     subset_names = open(self.DATA_FILES[phase]).read().split()
@@ -178,13 +261,7 @@ class IndoorPairDataset(PairDataset):
           content = f.readlines()
         fnames = [x.strip().split() for x in content]
         for fname in fnames:
-          #print(fname)
-          tmp0 = np.load(root + fname[0], allow_pickle=True)['pcd']
-          tmp1 = np.load(root + fname[1], allow_pickle=True)['pcd']
-          if (tmp0.shape[0] != 0) and (tmp1.shape[0] != 0):
-            self.files.append([fname[0], fname[1]])
-          else:
-            logging.info(f"files has no pcd:{fname[0]} {fname[1]}")
+          self.files.append([fname[0], fname[1]])
 
   def __getitem__(self, idx):
     file0 = os.path.join(self.root, self.files[idx][0])
@@ -201,6 +278,7 @@ class IndoorPairDataset(PairDataset):
     color0 = data0["color"]
     color1 = data1["color"]
     matching_search_voxel_size = self.matching_search_voxel_size
+
 
     if self.random_scale and random.random() < 0.95:
       scale = self.min_scale + \
@@ -236,6 +314,18 @@ class IndoorPairDataset(PairDataset):
     pcd1.points = o3d.utility.Vector3dVector(np.array(pcd1.points)[sel1])
     # Get matches
     matches = get_matching_indices(pcd0, pcd1, trans, matching_search_voxel_size)
+    # Get neighborhoods of pcd0 and pcd1
+    neighbor0_mask,num_neighbor0 = get_neighbor_indices(pcd0, 0.025*2.5)
+    neighbor1_mask,num_neighbor1 = get_neighbor_indices(pcd1, 0.025*2.5)
+    #print("pcd1 points shape:",np.shape(pcd1.points))
+
+    #neg_inds = get_hardest_neigative_indices(pcd1,0.125)
+    #print("neg_inds shape:",neg_inds.shape)
+
+    #num_neighbor0 = np.count_nonzero(neighbor0_mask != len(pcd0.points),axis=1)
+    #num_neighbor1 = np.count_nonzero(neighbor1_mask != len(pcd1.points),axis=1)
+    #print(num_neighbor0.shape)
+    #print(matches[0:100,:])
 
     # Get features
     npts0 = len(pcd0.colors)
@@ -278,9 +368,14 @@ class IndoorPairDataset(PairDataset):
 
     #print("coords shape:",coords0.shape)
     #print("feature shape:", feats0.shape)
+    if self.sample_num > min(npts0,npts1):
+      sample_num = min(npts0,npts1)
+      #print(sample_num)
+    else:
+      sample_num = self.sample_num
 
 
-    return (xyz0, xyz1, coords0, coords1, feats0, feats1, matches, trans)
+    return (xyz0, xyz1, coords0, coords1, feats0, feats1, matches, trans, sample_num, neighbor0_mask, neighbor1_mask,num_neighbor0,num_neighbor1)
 
 
 class KITTIPairDataset(PairDataset):
@@ -1606,7 +1701,7 @@ def make_data_loader(config, phase, batch_size, num_threads=0, shuffle=None):
       random_rotation=use_random_rotation,
       config=config)
 
-  #print(dset[0].files)
+  print(len(dset))
 
   loader = torch.utils.data.DataLoader(
       dset,

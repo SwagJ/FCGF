@@ -22,6 +22,7 @@ def extract_features(model,
                      xyz,
                      rgb=None,
                      normal=None,
+                     feat=None,
                      voxel_size=0.05,
                      device=None,
                      skip_check=False,
@@ -71,7 +72,10 @@ def extract_features(model,
     # [-1, 1]
     feats.append(normal / 2)
 
-  if rgb is None and normal is None:
+  if feat is not None:
+    feats.append(feat)
+
+  if rgb is None and normal is None and feat is None:
     feats.append(np.ones((len(xyz), 1)))
 
   feats = np.hstack(feats)

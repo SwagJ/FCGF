@@ -4,6 +4,7 @@ import math
 
 import open3d as o3d
 from lib.eval import find_nn_cpu
+from scipy.spatial.distance import cdist
 
 
 def make_open3d_point_cloud(xyz, color=None):
@@ -65,6 +66,45 @@ def get_matching_indices(source, target, trans, search_voxel_size, K=None):
       match_inds.append((i, j))
   return match_inds
 
+def get_neighbor_indices(source, search_voxel_size, K=None):
+  source_copy = copy.deepcopy(source)
+  #target_copy = copy.deepcopy(target)
+  #source_copy.transform(trans)
+  pcd_tree = o3d.geometry.KDTreeFlann(source_copy)
+  input_shape = np.shape(source.points)
+
+  neighbor_inds = []
+  #more_10 = []
+  #less_10 = []
+  #neighbor_mask = np.zeros((input_shape[0],input_shape[0]))
+  num_neighbor = []
+  for i, point in enumerate(source_copy.points):
+    [_, idx, _] = pcd_tree.search_radius_vector_3d(point, search_voxel_size)
+    if K is not None:
+      idx = idx[:K]
+    if len(idx) >= 40:
+      neighbor_inds.append(np.array(idx[0:40]))
+      num_neighbor.append(40)
+    else:
+      neighbor_inds.append(np.concatenate((idx,np.array([input_shape[0]]*(40-len(idx))))))
+      num_neighbor.append(len(idx))
+
+  neighbor_inds = np.vstack(neighbor_inds)
+  num_neighbor = np.array(num_neighbor)
+  return neighbor_inds,num_neighbor
+
+def get_hardest_neigative_indices(source,safe_radius):
+  points = np.array(source.points)
+  dist = cdist(points,points)
+  neg_mask = (dist > safe_radius).astype(float)
+  #print("dist[0:100]:",np.where(dist[:,0] <= safe_radius))
+  #print("mask[0:100]:",np.where(neg_mask[:,0] == 0))
+  neg_mask[neg_mask == False] = 1e6
+  #print("neg mask is 100 index:",np.where(neg_mask[:,0] == 100))
+  #dist[dist < safe_radius] = np.max(dist)
+  #neg_inds = np.argsort(dist,axis=1)[:,0]
+
+  return neg_mask
 
 def evaluate_feature(pcd0, pcd1, feat0, feat1, trans_gth, search_voxel_size):
   match_inds = get_matching_indices(pcd0, pcd1, trans_gth, search_voxel_size)

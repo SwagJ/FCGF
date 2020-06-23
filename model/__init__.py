@@ -1,6 +1,8 @@
 import logging
 import model.simpleunet as simpleunets
 import model.resunet as resunets
+import model.detection_net as detection_net
+import model.con_spa_net as con_spa_net
 
 MODELS = []
 
@@ -11,6 +13,8 @@ def add_models(module):
 
 add_models(simpleunets)
 add_models(resunets)
+add_models(detection_net)
+add_models(con_spa_net)
 
 
 def load_model(name):

@@ -29,7 +29,10 @@ def find_nn_gpu(F0, F1, nn_max_n=-1, return_distance=False, dist_type='SquareL2'
       inds.append(ind.cpu())
 
     if C * stride < N:
+      #print("F0 dim:",np.shape(F0[C*stride:]))
+      #print("F1 dim:",np.shape(F1))
       dist = pdist(F0[C * stride:], F1, dist_type=dist_type)
+      #print("dist shape:",np.shape(dist))
       min_dist, ind = dist.min(dim=1)
       dists.append(min_dist.detach().unsqueeze(1).cpu())
       inds.append(ind.cpu())

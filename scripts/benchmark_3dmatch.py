@@ -30,7 +30,7 @@ logging.basicConfig(
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
 
-def extract_features_batch(model, config, source_path, target_path, voxel_size, device):
+def extract_features_batch(model, config, source_path, target_path, voxel_size, device, with_feature):
 
   folders = get_folder_list(source_path)
   assert len(folders) > 0, f"Could not find 3DMatch folders under {source_path}"
@@ -45,11 +45,18 @@ def extract_features_batch(model, config, source_path, target_path, voxel_size, 
     if 'evaluation' in fo:
       continue
     files = get_file_list(fo, ".ply")
+    feat_file = get_file_list(fo, ".npy")
     fo_base = os.path.basename(fo)
     f.write("%s %d\n" % (fo_base, len(files)))
     for i, fi in enumerate(files):
+      #print(feat_file[i])
       # Extract features from a file
       pcd = o3d.io.read_point_cloud(fi)
+      if with_feature == True:
+        feat = np.load(feat_file[i],allow_pickle=True)
+        feat = np.real(feat)
+      else:
+        feat = None
       save_fn = "%s_%03d" % (fo_base, i)
       if i % 100 == 0:
         logging.info(f"{i} / {len(files)}: {save_fn}")
@@ -60,6 +67,7 @@ def extract_features_batch(model, config, source_path, target_path, voxel_size, 
           xyz=np.array(pcd.points),
           rgb=None,
           normal=None,
+          feat=feat,
           voxel_size=voxel_size,
           device=device,
           skip_check=True)
@@ -192,6 +200,10 @@ def feature_evaluation(source_path, feature_path, voxel_size, num_rand_keypoints
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
+
+  def str2bool(v):
+    return v.lower() in ('true', '1')
+
   parser.add_argument(
       '--source', default=None, type=str, help='path to 3dmatch test dataset')
   parser.add_argument(
@@ -224,6 +236,7 @@ if __name__ == '__main__':
       type=int,
       default=5000,
       help='Number of random keypoints for each scene')
+  parser.add_argument("--with_feature",default=False,type=str2bool)
 
   args = parser.parse_args()
 
@@ -239,7 +252,10 @@ if __name__ == '__main__':
     config = checkpoint['config']
 
     num_feats = 1
+    if args.with_feature == True:
+      num_feats = 10
     Model = load_model(config.model)
+    print(Model)
     model = Model(
         num_feats,
         config.model_n_out,
@@ -254,7 +270,7 @@ if __name__ == '__main__':
 
     with torch.no_grad():
       extract_features_batch(model, config, args.source, args.target, config.voxel_size,
-                             device)
+                             device,args.with_feature)
 
   if args.evaluate_feature_match_recall:
     assert (args.target is not None)
